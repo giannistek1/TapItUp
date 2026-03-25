@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="PumpMaui.SongSelectPage"
+             Title="Song Select"
+             BackgroundColor="#05010F"
+             NavigationPage.HasNavigationBar="False">
+
+    <Grid Padding="{OnPlatform Default=16, iOS=8, Android=8}" RowDefinitions="Auto,Auto,*,Auto">
+
+        <!-- Header - Responsive sizing -->
+        <VerticalStackLayout Grid.Row="0" Spacing="2" Margin="0,4,0,8">
+            <Label Text="PUMP IT UP PHOENIX"
+                   FontSize="{OnPlatform Default=28, iOS=22, Android=22}"
+                   FontAttributes="Bold"
+                   TextColor="#FFF4FF"
+                   HorizontalTextAlignment="Center" />
+            <Label Text="Select a song to play"
+                   FontSize="{OnPlatform Default=14, iOS=12, Android=12}"
+                   TextColor="#D0B7FF"
+                   HorizontalTextAlignment="Center" />
+        </VerticalStackLayout>
+
+        <!-- Load buttons - Responsive layout -->
+        <HorizontalStackLayout Grid.Row="1"
+                               Spacing="8"
+                               HorizontalOptions="Center"
+                               Margin="0,0,0,12">
+            <Button Text="Phoenix Songs"
+                    Clicked="OnLoadDemoClicked"
+                    BackgroundColor="#A100FF"
+                    TextColor="White"
+                    CornerRadius="10"
+                    WidthRequest="{OnPlatform Default=160, iOS=140, Android=140}"
+                    HeightRequest="{OnPlatform Default=44, iOS=40, Android=40}"
+                    FontSize="{OnPlatform Default=14, iOS=12, Android=12}" />
+            <Button Text="External Folder"
+                    Clicked="OnOpenFolderClicked"
+                    BackgroundColor="#5D42E6"
+                    TextColor="White"
+                    CornerRadius="10"
+                    WidthRequest="{OnPlatform Default=160, iOS=140, Android=140}"
+                    HeightRequest="{OnPlatform Default=44, iOS=40, Android=40}"
+                    FontSize="{OnPlatform Default=14, iOS=12, Android=12}" />
+        </HorizontalStackLayout>
+
+        <!-- Song list -->
+        <CollectionView Grid.Row="2"
+                        x:Name="SongListView"
+                        ItemsSource="{Binding SongList}"
+                        SelectionMode="Single"
+                        SelectionChanged="OnSongSelected">
+            <CollectionView.EmptyView>
+                <Label Text="Loading Phoenix song collection..."
+                       TextColor="#8C76B5"
+                       FontSize="{OnPlatform Default=14, iOS=12, Android=12}"
+                       HorizontalTextAlignment="Center"
+                       VerticalTextAlignment="Center"
+                       Margin="0,40" />
+            </CollectionView.EmptyView>
+            <CollectionView.ItemTemplate>
+                <DataTemplate>
+                    <Border Margin="0,3"
+                            Padding="{OnPlatform Default=12, iOS=8, Android=8}"
+                            Stroke="#4C327C"
+                            StrokeThickness="1"
+                            Background="#1A102A"
+                            StrokeShape="RoundRectangle 10">
+                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
+                            <Label Grid.Row="0" Grid.Column="0"
+                                   Text="{Binding Title}"
+                                   FontAttributes="Bold"
+                                   FontSize="{OnPlatform Default=16, iOS=14, Android=14}"
+                                   TextColor="#FFF4FF" />
+                            <Label Grid.Row="1" Grid.Column="0"
+                                   Text="{Binding Artist}"
+                                   FontSize="{OnPlatform Default=13, iOS=11, Android=11}"
+                                   TextColor="#D0B7FF" />
+                            <Label Grid.Row="2" Grid.Column="0"
+                                   Text="{Binding ChartSummary}"
+                                   FontSize="{OnPlatform Default=12, iOS=10, Android=10}"
+                                   TextColor="#FFE76A" />
+                            <Label Grid.Row="0" Grid.Column="1"
+                                   Grid.RowSpan="3"
+                                   Text="▶"
+                                   FontSize="{OnPlatform Default=22, iOS=18, Android=18}"
+                                   TextColor="#D94BFF"
+                                   VerticalTextAlignment="Center"
+                                   Margin="12,0,0,0" />
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+
+        <!-- Selected song / chart panel - More compact -->
+        <Border Grid.Row="3"
+                Background="#140A29"
+                Stroke="#3E2B72"
+                StrokeThickness="2"
+                Padding="{OnPlatform Default=12, iOS=8, Android=8}"
+                Margin="0,8,0,0"
+                IsVisible="{Binding HasSelection}">
+            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="6">
+                <VerticalStackLayout Grid.Column="0" Grid.Row="0" Spacing="2">
+                    <Label x:Name="SelectedTitleLabel"
+                           FontSize="{OnPlatform Default=18, iOS=16, Android=16}"
+                           FontAttributes="Bold"
+                           TextColor="#FFF4FF" />
+                    <Label x:Name="SelectedArtistLabel"
+                           FontSize="{OnPlatform Default=13, iOS=11, Android=11}"
+                           TextColor="#D0B7FF" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Grid.Column="0" Grid.Row="1" Spacing="4">
+                    <Label Text="Chart" FontAttributes="Bold" TextColor="#FCE3FF" 
+                           FontSize="{OnPlatform Default=12, iOS=10, Android=10}" />
+                    <Picker x:Name="ChartPicker"
+                            Title="Select chart"
+                            SelectedIndexChanged="OnChartChanged"
+                            TextColor="#FFF4FF"
+                            TitleColor="#8C76B5"
+                            FontSize="{OnPlatform Default=14, iOS=12, Android=12}"
+                            HeightRequest="{OnPlatform Default=40, iOS=35, Android=35}" />
+                </VerticalStackLayout>
+
+                <Button Grid.Column="1"
+                        Grid.Row="0"
+                        Grid.RowSpan="2"
+                        x:Name="PlayButton"
+                        Text="PLAY"
+                        Clicked="OnPlayClicked"
+                        BackgroundColor="#D94BFF"
+                        TextColor="White"
+                        FontAttributes="Bold"
+                        FontSize="{OnPlatform Default=18, iOS=16, Android=16}"
+                        CornerRadius="14"
+                        WidthRequest="{OnPlatform Default=90, iOS=80, Android=80}"
+                        HeightRequest="{OnPlatform Default=60, iOS=50, Android=50}"
+                        VerticalOptions="Center" />
+            </Grid>
+        </Border>
+    </Grid>
+</ContentPage>

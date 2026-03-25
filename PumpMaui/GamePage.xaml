@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
+             x:Class="PumpMaui.GamePage"
+             BackgroundColor="#05010F"
+             NavigationPage.HasNavigationBar="False">
+
+    <Grid x:Name="MainGrid">
+        <!-- Portrait Layout -->
+        <Grid x:Name="PortraitLayout" 
+              IsVisible="True"
+              Padding="{OnPlatform Default=12, iOS=6, Android=6}" 
+              RowDefinitions="Auto,*,Auto">
+
+            <!-- HUD - Responsive sizing -->
+            <Border Grid.Row="0"
+                    Background="#140A29"
+                    Stroke="#3E2B72"
+                    StrokeThickness="2"
+                    Padding="{OnPlatform Default=12, iOS=8, Android=8}"
+                    Margin="0,0,0,8">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="6">
+                    <VerticalStackLayout Grid.Column="0" Spacing="1">
+                        <Label x:Name="TitleLabel"
+                               FontSize="{OnPlatform Default=16, iOS=14, Android=14}"
+                               FontAttributes="Bold"
+                               TextColor="#FFF4FF"
+                               LineBreakMode="TailTruncation" />
+                        <Label x:Name="MetaLabel"
+                               FontSize="{OnPlatform Default=10, iOS=9, Android=9}"
+                               TextColor="#B89EEA"
+                               LineBreakMode="TailTruncation" />
+                    </VerticalStackLayout>
+
+                    <VerticalStackLayout Grid.Column="1" Spacing="1">
+                        <Label Text="Score" FontAttributes="Bold" TextColor="#FCE3FF" 
+                               FontSize="{OnPlatform Default=10, iOS=9, Android=9}" />
+                        <Label x:Name="ScoreLabel" Text="0000000" 
+                               FontSize="{OnPlatform Default=16, iOS=14, Android=14}" 
+                               FontAttributes="Bold" TextColor="#FFE76A" />
+                    </VerticalStackLayout>
+
+                    <VerticalStackLayout Grid.Column="2" Spacing="1">
+                        <Label Text="Grade" FontAttributes="Bold" TextColor="#FCE3FF" 
+                               FontSize="{OnPlatform Default=10, iOS=9, Android=9}" />
+                        <Label x:Name="GradeLabel" Text="D" 
+                               FontSize="{OnPlatform Default=16, iOS=14, Android=14}" 
+                               FontAttributes="Bold" TextColor="#7EE7FF" />
+                    </VerticalStackLayout>
+
+                    <VerticalStackLayout Grid.Column="3" Spacing="1">
+                        <Label Text="Acc" FontAttributes="Bold" TextColor="#FCE3FF" 
+                               FontSize="{OnPlatform Default=10, iOS=9, Android=9}" />
+                        <Label x:Name="AccuracyLabel" Text="0.00%" 
+                               FontSize="{OnPlatform Default=14, iOS=12, Android=12}" 
+                               FontAttributes="Bold" TextColor="#B4FF8E" />
+                    </VerticalStackLayout>
+
+                    <Button Grid.Column="4"
+                            Text="✕"
+                            Clicked="OnStopClicked"
+                            BackgroundColor="#4B275E"
+                            TextColor="White"
+                            CornerRadius="8"
+                            WidthRequest="{OnPlatform Default=40, iOS=35, Android=35}"
+                            HeightRequest="{OnPlatform Default=40, iOS=35, Android=35}"
+                            FontSize="{OnPlatform Default=16, iOS=14, Android=14}" />
+                </Grid>
+            </Border>
+
+            <!-- Game area with responsive layout -->
+            <Grid Grid.Row="1">
+                <!-- Background -->
+                <Image x:Name="BackgroundPreview"
+                       Aspect="AspectFill"
+                       Opacity="0.3"
+                       HorizontalOptions="FillAndExpand"
+                       VerticalOptions="FillAndExpand" />
+
+                <!-- Note field -->
+                <GraphicsView x:Name="NoteFieldView"
+                              HorizontalOptions="FillAndExpand"
+                              VerticalOptions="FillAndExpand" />
+
+                <!-- Portrait Pad -->
+                <Grid x:Name="PortraitPad"
+                      HorizontalOptions="Center"
+                      VerticalOptions="End"
+                      Margin="{OnPlatform Default='0,0,0,20', iOS='0,0,0,10', Android='0,0,0,10'}" />
+
+                <!-- Invisible text entry for keyboard input -->
+                <Entry x:Name="KeyCatcher"
+                       IsVisible="False"
+                       TextChanged="KeyCatcher_TextChanged"
+                       Unfocused="KeyCatcher_Unfocused" />
+            </Grid>
+
+            <!-- Bottom HUD - Compact mobile design -->
+            <Border Grid.Row="2"
+                    Background="#140A29"
+                    Stroke="#3E2B72"
+                    StrokeThickness="1"
+                    Padding="{OnPlatform Default=8, iOS=6, Android=6}"
+                    Margin="0,8,0,0">
+                <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,*" ColumnSpacing="8" RowSpacing="4">
+                    <Label Grid.Row="0" Grid.Column="0"
+                           x:Name="JudgmentLabel"
+                           Text="READY"
+                           FontSize="{OnPlatform Default=14, iOS=12, Android=12}"
+                           FontAttributes="Bold"
+                           TextColor="#FFE76A"
+                           HorizontalTextAlignment="Start" />
+
+                    <Label Grid.Row="0" Grid.Column="1"
+                           x:Name="ComboLabel"
+                           Text="0 COMBO"
+                           FontSize="{OnPlatform Default=14, iOS=12, Android=12}"
+                           FontAttributes="Bold"
+                           TextColor="#B4FF8E"
+                           HorizontalTextAlignment="End" />
+
+                    <Label Grid.Row="1" Grid.ColumnSpan="2"
+                           x:Name="CountsLabel"
+                           Text="PERFECT 0 • GREAT 0 • GOOD 0 • BAD 0 • MISS 0"
+                           FontSize="{OnPlatform Default=10, iOS=9, Android=9}"
+                           TextColor="#D0B7FF"
+                           HorizontalTextAlignment="Center"
+                           LineBreakMode="TailTruncation" />
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Landscape Layout -->
+        <Grid x:Name="LandscapeLayout" 
+              IsVisible="False"
+              ColumnDefinitions="Auto,*,Auto">
+
+            <!-- Left side controls and minimal HUD -->
+            <Grid Grid.Column="0" 
+                  WidthRequest="200"
+                  RowDefinitions="Auto,*,Auto"
+                  Padding="8">
+                
+                <!-- Minimal top HUD -->
+                <StackLayout Grid.Row="0" Spacing="4">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <StackLayout Grid.Column="0">
+                            <Label x:Name="LandscapeTitleLabel"
+                                   FontSize="12"
+                                   FontAttributes="Bold"
+                                   TextColor="#FFF4FF"
+                                   LineBreakMode="TailTruncation" />
+                            <Label x:Name="LandscapeMetaLabel"
+                                   FontSize="9"
+                                   TextColor="#B89EEA"
+                                   LineBreakMode="TailTruncation" />
+                        </StackLayout>
+                        <Button Grid.Column="1"
+                                Text="✕"
+                                Clicked="OnStopClicked"
+                                BackgroundColor="#4B275E"
+                                TextColor="White"
+                                CornerRadius="6"
+                                WidthRequest="30"
+                                HeightRequest="30"
+                                FontSize="12" />
+                    </Grid>
+                    
+                    <!-- Compact score display -->
+                    <Grid ColumnDefinitions="*,*,*" ColumnSpacing="4" Margin="0,8,0,0">
+                        <StackLayout Grid.Column="0">
+                            <Label Text="Score" FontSize="8" FontAttributes="Bold" TextColor="#FCE3FF" />
+                            <Label x:Name="LandscapeScoreLabel" Text="0000000" FontSize="11" 
+                                   FontAttributes="Bold" TextColor="#FFE76A" />
+                        </StackLayout>
+                        <StackLayout Grid.Column="1">
+                            <Label Text="Grade" FontSize="8" FontAttributes="Bold" TextColor="#FCE3FF" />
+                            <Label x:Name="LandscapeGradeLabel" Text="D" FontSize="11" 
+                                   FontAttributes="Bold" TextColor="#7EE7FF" />
+                        </StackLayout>
+                        <StackLayout Grid.Column="2">
+                            <Label Text="Acc" FontSize="8" FontAttributes="Bold" TextColor="#FCE3FF" />
+                            <Label x:Name="LandscapeAccuracyLabel" Text="0.00%" FontSize="10" 
+                                   FontAttributes="Bold" TextColor="#B4FF8E" />
+                        </StackLayout>
+                    </Grid>
+                </StackLayout>
+
+                <!-- Left input pad -->
+                <Grid x:Name="LandscapeLeftPad" 
+                      Grid.Row="1"
+                      VerticalOptions="End"
+                      Margin="0,0,0,20" />
+                
+                <!-- Left bottom HUD -->
+                <StackLayout Grid.Row="2" Spacing="2">
+                    <Label x:Name="LandscapeJudgmentLabel" Text="READY" FontSize="11" 
+                           FontAttributes="Bold" TextColor="#FFE76A" />
+                    <Label x:Name="LandscapeComboLabel" Text="0 COMBO" FontSize="11" 
+                           FontAttributes="Bold" TextColor="#B4FF8E" />
+                </StackLayout>
+            </Grid>
+
+            <!-- Center - Narrow note field -->
+            <Grid Grid.Column="1" Margin="10,0">
+                <!-- Background for center area only -->
+                <Image x:Name="LandscapeBackgroundPreview"
+                       Aspect="AspectFill"
+                       Opacity="0.2"
+                       HorizontalOptions="FillAndExpand"
+                       VerticalOptions="FillAndExpand" />
+                
+                <!-- Narrow note field -->
+                <GraphicsView x:Name="LandscapeNoteFieldView"
+                              HorizontalOptions="FillAndExpand"
+                              VerticalOptions="FillAndExpand"
+                              WidthRequest="300" />
+            </Grid>
+
+            <!-- Right side controls -->
+            <Grid Grid.Column="2" 
+                  WidthRequest="200"
+                  RowDefinitions="Auto,*,Auto"
+                  Padding="8">
+                
+                <!-- Right input pad -->
+                <Grid x:Name="LandscapeRightPad" 
+                      Grid.Row="1"
+                      VerticalOptions="End"
+                      Margin="0,0,0,20" />
+                      
+                <!-- Right bottom stats -->
+                <Label Grid.Row="2"
+                       x:Name="LandscapeCountsLabel"
+                       Text="PERFECT 0 • GREAT 0 • GOOD 0 • BAD 0 • MISS 0"
+                       FontSize="8"
+                       TextColor="#D0B7FF"
+                       HorizontalTextAlignment="Center"
+                       LineBreakMode="TailTruncation" />
+            </Grid>
+        </Grid>
+
+        <!-- Audio player -->
+        <toolkit:MediaElement x:Name="SongMediaElement"
+                             IsVisible="False"
+                             ShouldAutoPlay="False" />
+    </Grid>
+</ContentPage>
