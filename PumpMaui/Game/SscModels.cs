@@ -12,6 +12,7 @@ public sealed class SscSong
     public IReadOnlyList<BpmChange> BpmChanges { get; init; } = [];
     public IReadOnlyList<SscChart> Charts { get; init; } = [];
     public string? SourcePath { get; init; }
+    public string BaseUrl { get; set; } = string.Empty;
 }
 
 public sealed class SscChart

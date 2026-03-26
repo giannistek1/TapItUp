@@ -47,6 +47,8 @@
                         WidthRequest="{OnPlatform Default=160, iOS=140, Android=140}"
                         HeightRequest="{OnPlatform Default=44, iOS=40, Android=40}"
                         FontSize="{OnPlatform Default=14, iOS=12, Android=12}" />
+
+                <Button x:Name="LoadRemoteButtonPortrait" Text="Load from URL" Clicked="OnLoadRemoteClicked" />
             </HorizontalStackLayout>
 
             <!-- Scroll Speed Slider -->
@@ -327,6 +329,7 @@
                             WidthRequest="120"
                             HeightRequest="35"
                             FontSize="12" />
+                    <Button x:Name="LoadRemoteButtonLandscape" Text="Load from URL" Clicked="OnLoadRemoteClicked" />
 
                     <!-- Scroll Speed Slider - Inline -->
                     <Border Background="#1A102A"
@@ -362,6 +365,29 @@
                                    HorizontalTextAlignment="Center" />
                         </Grid>
                     </Border>
+
+                    <!-- Note Skin Selector - Landscape -->
+                    <Label Grid.Column="3"
+                           Text="Note Skin"
+                           FontSize="{OnPlatform Default=14, iOS=12, Android=12}"
+                           FontAttributes="Bold"
+                           TextColor="#FCE3FF"
+                           VerticalTextAlignment="Center" />
+                    <Picker Grid.Column="4"
+                            x:Name="NoteSkinPickerLandscape"
+                            SelectedItem="{Binding NoteSkin}"
+                            TextColor="#FFF4FF"
+                            TitleColor="#8C76B5"
+                            FontSize="{OnPlatform Default=14, iOS=12, Android=12}"
+                            HeightRequest="{OnPlatform Default=40, iOS=35, Android=35}"
+                            WidthRequest="100">
+                        <Picker.Items>
+                            <x:String>Prime</x:String>
+                            <x:String>Fiesta2</x:String>
+                            <x:String>Old</x:String>
+                            <x:String>NXA</x:String>
+                        </Picker.Items>
+                    </Picker>
                 </HorizontalStackLayout>
 
                 <!-- Right Controls - Chart Selection -->

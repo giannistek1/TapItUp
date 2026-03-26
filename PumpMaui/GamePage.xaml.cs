@@ -1,6 +1,7 @@
 ﻿using CommunityToolkit.Maui.Views;
 using PumpMaui.Game;
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace PumpMaui;
 
@@ -79,6 +80,9 @@ public partial class GamePage : ContentPage
         StopGame();
     }
 
+    private static readonly HttpClient _http = new();
+    private Stream? _audioStream;
+    private string? _audioTempFile;
     private async Task LoadSongFromData()
     {
         try
@@ -89,8 +93,7 @@ public partial class GamePage : ContentPage
             GameStartData? gameStartData = null;
             try
             {
-                gameStartData = System.Text.Json.JsonSerializer.Deserialize<GameStartData>(
-                    Uri.UnescapeDataString(SongDataJson));
+                gameStartData = JsonSerializer.Deserialize<GameStartData>(SongDataJson);
                 System.Diagnostics.Debug.WriteLine("✅ Successfully deserialized as GameStartData");
             }
             catch (Exception ex)
@@ -126,13 +129,43 @@ public partial class GamePage : ContentPage
                 System.Diagnostics.Debug.WriteLine($"   Chart: {_chart.Difficulty} {_chart.Meter}");
                 System.Diagnostics.Debug.WriteLine($"   Chart has {_chart.Notes.Count} notes");
 
+                // 🎵 LOAD / STREAM AUDIO
+                if (!string.IsNullOrWhiteSpace(gameStartData.RemoteAudioUrl))
+                {
+                    try
+                    {
+                        System.Diagnostics.Debug.WriteLine($"🎵 Loading audio: {gameStartData.RemoteAudioUrl}");
+                        if (Uri.IsWellFormedUriString(gameStartData.RemoteAudioUrl, UriKind.Absolute))
+                        {
+                            // 🌍 STREAM FROM CDN
+                            System.Diagnostics.Debug.WriteLine("🌐 Streaming MP3 from remote URL...");
+
+                            _audioStream = await _http.GetStreamAsync(gameStartData.RemoteAudioUrl);
+
+                            var fileName = Path.GetFileName(new Uri(gameStartData.RemoteAudioUrl).LocalPath);
+                            var tempPath = Path.Combine(FileSystem.CacheDirectory, fileName);
+
+                            await using (var fileStream = File.Create(tempPath))
+                            {
+                                await _audioStream.CopyToAsync(fileStream);
+                            }
+
+                            System.Diagnostics.Debug.WriteLine($"✅ Audio cached to: {tempPath}");
+                            _audioTempFile = tempPath;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"❌ Failed to load audio: {ex.Message}");
+                    }
+                }
+
                 await LoadSongAndChart();
                 return;
             }
 
             // Fallback to old GamePageData format for compatibility
-            var gameData = System.Text.Json.JsonSerializer.Deserialize<GamePageData>(
-                Uri.UnescapeDataString(SongDataJson));
+            var gameData = JsonSerializer.Deserialize<GamePageData>(SongDataJson);
 
             if (gameData is null)
             {
@@ -319,6 +352,16 @@ public partial class GamePage : ContentPage
 
         // Add a small delay to ensure MediaElement is fully reset
         await Task.Delay(50);
+
+        if (!string.IsNullOrEmpty(_audioTempFile) && File.Exists(_audioTempFile))
+        {
+            System.Diagnostics.Debug.WriteLine($"🎵 Using cached remote audio: {_audioTempFile}");
+
+            var fileUri = new Uri(_audioTempFile).AbsoluteUri;
+            SongMediaElement.Source = MediaSource.FromUri(fileUri);
+            SongMediaElement.Play();
+            return;
+        }
 
         if (_song is null || string.IsNullOrWhiteSpace(_song.MusicPath)) return;
 
@@ -950,7 +993,8 @@ public partial class GamePage : ContentPage
         public SscSong Song { get; set; } = null!;
         public SscChart Chart { get; set; } = null!;
         public double ScrollSpeed { get; set; } = GameConstants.DefaultScrollSpeed;
-        public string NoteSkin { get; set; } = "Default";
+        public string NoteSkin { get; set; } = "Prime";
+        public string? RemoteAudioUrl { get; set; }
     }
 
     private sealed class GameResultsData

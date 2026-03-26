@@ -2,6 +2,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 
 namespace PumpMaui;
 
@@ -555,17 +556,31 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
             System.Diagnostics.Debug.WriteLine($"   Scroll Speed: {ScrollSpeed:F1}x");
             System.Diagnostics.Debug.WriteLine($"   Note Skin: {NoteSkin}");
 
+            var audioUrl = !string.IsNullOrWhiteSpace(_selectedSong.BaseUrl)
+                ? RemoteSongService.ResolveAssetUrl(_selectedSong, _selectedSong.MusicPath)
+                : null;
+
+            if (!string.IsNullOrWhiteSpace(audioUrl))
+            {
+                // 🔥 FORCE proper URL encoding
+                audioUrl = new Uri(audioUrl).AbsoluteUri;
+            }
+
             var gameData = new GameStartData
             {
                 Song = _selectedSong,
                 Chart = _selectedChart,
                 ScrollSpeed = ScrollSpeed,
-                NoteSkin = NoteSkin
+                NoteSkin = NoteSkin,
+                RemoteAudioUrl = audioUrl   // add this property to GameStartData
             };
+
+            var json = JsonSerializer.Serialize(gameData);
+            var encodedJson = Uri.EscapeDataString(json);
 
             var queryParams = new Dictionary<string, object>
             {
-                { "songData", System.Text.Json.JsonSerializer.Serialize(gameData) }
+                { "songData", encodedJson }
             };
 
             await Shell.Current.GoToAsync("GamePage", queryParams);
@@ -610,6 +625,54 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
         }
     }
 
+    private async void OnLoadRemoteClicked(object sender, EventArgs e)
+    {
+        // Prompt for the base URL (or you can wire this to a persistent Entry in XAML)
+        var url = await DisplayPromptAsync(
+            "Remote Song Library",
+            "Enter your Cloudflare bucket base URL:",
+            placeholder: "https://pub-fac3ff2c2b384776b2761efc75069033.r2.dev",
+            initialValue: Preferences.Get("RemoteBaseUrl", "https://pub-fac3ff2c2b384776b2761efc75069033.r2.dev"));
+
+        if (string.IsNullOrWhiteSpace(url)) return;
+
+        // Persist so the user doesn't have to retype it
+        Preferences.Set("RemoteBaseUrl", url.TrimEnd('/'));
+
+        try
+        {
+            // Show a simple loading indicator
+            LoadRemoteButtonPortrait.IsEnabled = false;
+            LoadRemoteButtonLandscape.IsEnabled = false;
+            LoadRemoteButtonPortrait.Text = "Loading...";
+            LoadRemoteButtonLandscape.Text = "Loading...";
+
+            var progress = new Progress<string>(msg =>
+                System.Diagnostics.Debug.WriteLine($"🌐 {msg}"));
+
+            var songs = await RemoteSongService.LoadSongsAsync(url, progress);
+
+            foreach (var song in songs)
+                AddSong(song);   // reuses your existing AddSong method
+
+            if (songs.Count == 0)
+                await DisplayAlert("No Songs", "No songs were found at that URL.", "OK");
+            else
+                await DisplayAlert("Done", $"Loaded {songs.Count} remote song(s).", "OK");
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlert("Error", $"Could not load remote songs:\n{ex.Message}", "OK");
+        }
+        finally
+        {
+            LoadRemoteButtonPortrait.IsEnabled = true;
+            LoadRemoteButtonPortrait.Text = "Load from URL";
+            LoadRemoteButtonLandscape.IsEnabled = true;
+            LoadRemoteButtonLandscape.Text = "Load from URL";
+        }
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
@@ -633,4 +696,5 @@ public class GameStartData
     public required SscChart Chart { get; set; }
     public double ScrollSpeed { get; set; } = GameConstants.DefaultScrollSpeed;
     public string NoteSkin { get; set; } = "Prime";
+    public string? RemoteAudioUrl { get; set; }
 }
