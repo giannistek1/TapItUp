@@ -1,4 +1,5 @@
 ﻿using PumpMaui.Game;
+using PumpMaui.Models;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -27,13 +28,13 @@ public static class RemoteSongService
     /// </summary>
     public static async Task<List<SscSong>> LoadSongsAsync(
         string baseUrl,
-        IProgress<string>? progress = null,
+        IProgress<LoadProgress>? progress = null,
         CancellationToken ct = default)
     {
         baseUrl = baseUrl.TrimEnd('/');
 
         // 1. Fetch the index
-        progress?.Report("Fetching song index...");
+        progress?.Report(new LoadProgress { Message = "Fetching song index..." });
         var indexUrl = $"{baseUrl}/songs.json";
         var indexJson = await _http.GetStringAsync(indexUrl, ct);
         var index = JsonSerializer.Deserialize<RemoteSongIndex>(indexJson)
@@ -41,13 +42,20 @@ public static class RemoteSongService
 
         // 2. Fetch + parse each .ssc
         var results = new List<SscSong>();
+        var i = 0;
 
         foreach (var relativePath in index.Songs)
         {
             try
             {
+                i++;
                 var sscUrl = ResolveIfRelative(baseUrl, relativePath);
-                progress?.Report($"Loading {Path.GetFileNameWithoutExtension(relativePath)}...");
+                progress?.Report(new LoadProgress
+                {
+                    Message = $"Loading {Path.GetFileNameWithoutExtension(relativePath)}...",
+                    Current = i,
+                    Total = index.Songs.Count
+                });
 
                 var sscContent = await _http.GetStringAsync(sscUrl, ct);
 

@@ -1,4 +1,5 @@
 ﻿using PumpMaui.Game;
+using PumpMaui.Models;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -53,6 +54,25 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
             OnPropertyChanged();
         }
     }
+
+    public ObservableCollection<GameSeriesItem> GameSeriesList { get; } = new();
+
+    private Dictionary<string, List<SscSong>> _songsBySeries = new();
+
+    private bool _isSeriesSelectionVisible = true;
+    public bool IsSeriesSelectionVisible
+    {
+        get => _isSeriesSelectionVisible;
+        set
+        {
+            if (_isSeriesSelectionVisible == value) return;
+            _isSeriesSelectionVisible = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsSongListVisible));
+        }
+    }
+
+    public bool IsSongListVisible => !IsSeriesSelectionVisible;
 
     public SongSelectPage()
     {
@@ -136,11 +156,11 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
         System.Diagnostics.Debug.WriteLine($"🎮 Scroll speed changed to: {ScrollSpeed:F1}x");
     }
 
-    private async Task LoadPhoenixSongsAsync()
+    private async Task LoadEmbeddedSongs()
     {
         try
         {
-            System.Diagnostics.Debug.WriteLine("🎵 Loading all Phoenix songs...");
+            System.Diagnostics.Debug.WriteLine("🎵 Loading embedded songs...");
 
             var loadedCount = 0;
 
@@ -156,9 +176,28 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
                     var song = SscParser.Parse(content, songPath);
                     System.Diagnostics.Debug.WriteLine($"   Parsed: '{song.Title}' - Charts: {song.Charts?.Count ?? 0}");
 
-                    if (song.Charts.Count > 0)
+                    if (song.Charts?.Count > 0)
                     {
-                        AddSong(song);
+                        var series = GetGameSeries(songPath);
+
+                        if (!_songsBySeries.ContainsKey(series))
+                        {
+                            _songsBySeries[series] = new List<SscSong>();
+
+                            GameSeriesList.Add(new GameSeriesItem
+                            {
+                                Name = series,
+                                Banner = ImageSource.FromStream(() =>
+                                {
+                                    return FileSystem
+                                        .OpenAppPackageFileAsync($"banner_{series.Replace(" ", "").ToLower()}.png")
+                                        .GetAwaiter()
+                                        .GetResult();
+                                })
+                            });
+                        }
+
+                        _songsBySeries[series].Add(song);
                         loadedCount++;
                     }
                     else
@@ -177,12 +216,12 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
             // Show a message if no songs were loaded
             if (loadedCount == 0)
             {
-                await DisplayAlert("No Songs", "No Phoenix songs could be loaded. Please check that the song files are included in your project.", "OK");
+                await DisplayAlert("No Songs", "No embedded songs could be loaded. Please check that the song files are included in your project.", "OK");
             }
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"❌ Failed to load Phoenix songs: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"❌ Failed to load embedded songs: {ex.Message}");
             await DisplayAlert("Error", $"Failed to load songs: {ex.Message}", "OK");
         }
     }
@@ -202,20 +241,32 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
 
     private static ImageSource? TryCreateBackground(SscSong song)
     {
-        if (string.IsNullOrWhiteSpace(song.SourcePath) || string.IsNullOrWhiteSpace(song.BackgroundPath))
+        if (string.IsNullOrWhiteSpace(song.SourcePath) ||
+            string.IsNullOrWhiteSpace(song.BackgroundPath))
             return null;
 
         try
         {
             var baseDirectory = Path.GetDirectoryName(song.SourcePath);
-            if (string.IsNullOrWhiteSpace(baseDirectory)) return null;
+            if (string.IsNullOrWhiteSpace(baseDirectory))
+                return null;
 
-            var combined = Path.Combine(baseDirectory,
-                song.BackgroundPath.Replace('/', Path.DirectorySeparatorChar));
-            return File.Exists(combined) ? ImageSource.FromFile(combined) : null;
+            // Normalize path for MAUI package
+            var relativePath = Path.Combine(baseDirectory,
+                song.BackgroundPath.Replace('\\', '/'))
+                .Replace('\\', '/'); // ensure forward slashes
+
+            return ImageSource.FromStream(() =>
+            {
+                return FileSystem
+                    .OpenAppPackageFileAsync(relativePath)
+                    .GetAwaiter()
+                    .GetResult();
+            });
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"❌ Background load failed: {ex.Message}");
             return null;
         }
     }
@@ -371,24 +422,6 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
             return $"{song.Charts.Count} chart(s)";
 
         return $"{string.Join(", ", summaryParts)} • {song.Charts.Count} chart(s)";
-    }
-
-    private async void OnLoadDemoClicked(object sender, EventArgs e)
-    {
-        // Clear existing songs before reloading to prevent duplicates
-        SongList.Clear();
-
-        // Clear any current selection
-        _selectedSong = null;
-        _selectedChart = null;
-        HasSelection = false;
-
-        // Clear both CollectionView selections
-        SongListView.SelectedItem = null;
-        if (LandscapeSongListView != null)
-            LandscapeSongListView.SelectedItem = null;
-
-        await LoadPhoenixSongsAsync();
     }
 
     private async void OnOpenFolderClicked(object sender, EventArgs e)
@@ -621,7 +654,7 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
         base.OnAppearing();
         if (SongList.Count == 0)
         {
-            await LoadPhoenixSongsAsync();
+            await LoadEmbeddedSongs();
         }
     }
 
@@ -630,7 +663,7 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
         // Prompt for the base URL (or you can wire this to a persistent Entry in XAML)
         var url = await DisplayPromptAsync(
             "Remote Song Library",
-            "Enter your Cloudflare bucket base URL:",
+            "Enter your CDN URL:",
             placeholder: "https://pub-fac3ff2c2b384776b2761efc75069033.r2.dev",
             initialValue: Preferences.Get("RemoteBaseUrl", "https://pub-fac3ff2c2b384776b2761efc75069033.r2.dev"));
 
@@ -638,6 +671,14 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
 
         // Persist so the user doesn't have to retype it
         Preferences.Set("RemoteBaseUrl", url.TrimEnd('/'));
+
+        LoadingLabelPortrait.IsVisible = true;
+        LoadingProgressBarPortrait.IsVisible = true;
+        LoadingProgressBarPortrait.Progress = 0;
+
+        LoadingLabelLandscape.IsVisible = true;
+        LoadingProgressBarLandscape.IsVisible = true;
+        LoadingProgressBarLandscape.Progress = 0;
 
         try
         {
@@ -647,13 +688,46 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
             LoadRemoteButtonPortrait.Text = "Loading...";
             LoadRemoteButtonLandscape.Text = "Loading...";
 
-            var progress = new Progress<string>(msg =>
-                System.Diagnostics.Debug.WriteLine($"🌐 {msg}"));
+            var progress = new Progress<LoadProgress>(p =>
+            {
+                MainThread.BeginInvokeOnMainThread(() =>
+                {
+                    LoadingLabelPortrait.Text = $"{p.Message} ({p.Current}/{p.Total})";
+                    LoadingProgressBarPortrait.Progress = p.Percentage;
+
+                    LoadingLabelLandscape.Text = $"{p.Message} ({p.Current}/{p.Total})";
+                    LoadingProgressBarLandscape.Progress = p.Percentage;
+                });
+            });
 
             var songs = await RemoteSongService.LoadSongsAsync(url, progress);
 
             foreach (var song in songs)
-                AddSong(song);   // reuses your existing AddSong method
+            {
+                if (song.Charts.Count > 0)
+                {
+                    var series = GetGameSeriesFromUrl(song.SourcePath ?? string.Empty);
+
+                    if (!_songsBySeries.ContainsKey(series))
+                    {
+                        _songsBySeries[series] = new List<SscSong>();
+
+                        GameSeriesList.Add(new GameSeriesItem
+                        {
+                            Name = series,
+                            Banner = ImageSource.FromStream(() =>
+                            {
+                                return FileSystem
+                                    .OpenAppPackageFileAsync($"banner_{series.Replace(" ", "").ToLower()}.png")
+                                    .GetAwaiter()
+                                    .GetResult();
+                            })
+                        });
+                    }
+
+                    _songsBySeries[series].Add(song);
+                }
+            }
 
             if (songs.Count == 0)
                 await DisplayAlert("No Songs", "No songs were found at that URL.", "OK");
@@ -670,7 +744,98 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
             LoadRemoteButtonPortrait.Text = "Load from URL";
             LoadRemoteButtonLandscape.IsEnabled = true;
             LoadRemoteButtonLandscape.Text = "Load from URL";
+
+            LoadingLabelPortrait.IsVisible = false;
+            LoadingProgressBarPortrait.IsVisible = false;
+            LoadingProgressBarPortrait.Progress = 0;
+
+            LoadingLabelLandscape.IsVisible = false;
+            LoadingProgressBarLandscape.IsVisible = false;
+            LoadingProgressBarLandscape.Progress = 0;
         }
+    }
+
+    // Helper
+    private string GetGameSeries(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return "UNKNOWN";
+
+        // Normalize slashes
+        path = path.Replace("\\", "/");
+
+        var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        // Find the part that contains " - "
+        var seriesPart = parts.FirstOrDefault(p => p.Contains(" - "));
+        if (string.IsNullOrWhiteSpace(seriesPart))
+            return "UNKNOWN";
+
+        // "16 - Phoenix " → "Phoenix"
+        var split = seriesPart.Split('-', 2);
+        if (split.Length < 2)
+            return "UNKNOWN";
+
+        return split[1].Trim().ToUpperInvariant();
+    }
+
+    // Helper
+    private string GetGameSeriesFromUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return "UNKNOWN";
+
+        var uri = new Uri(url);
+
+        // AbsolutePath is already URL-decoded except for some cases
+        var path = Uri.UnescapeDataString(uri.AbsolutePath);
+
+        var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        if (parts.Length == 0)
+            return "UNKNOWN";
+
+        var seriesPart = parts[0]; // "16 - PHOENIX"
+
+        var split = seriesPart.Split('-', 2);
+        if (split.Length < 2)
+            return "UNKNOWN";
+
+        return split[1].Trim().ToUpperInvariant();
+    }
+
+    private void OnSeriesSelected(object sender, SelectionChangedEventArgs e)
+    {
+        var selected = e.CurrentSelection.FirstOrDefault() as GameSeriesItem;
+        if (selected == null)
+            return;
+
+        SongList.Clear();
+
+        if (_songsBySeries.TryGetValue(selected.Name, out var songs))
+        {
+            foreach (var song in songs)
+                AddSong(song);
+        }
+
+        // 🔥 Switch UI
+        IsSeriesSelectionVisible = false;
+    }
+
+    private void OnBackToSeriesClicked(object sender, EventArgs e)
+    {
+        // Clear songs + selection
+        SongList.Clear();
+        _selectedSong = null;
+        _selectedChart = null;
+        HasSelection = false;
+
+        // If you have both layouts:
+        PortraitSeriesCollectionView.SelectedItem = null;
+        LandscapeSeriesCollectionView.SelectedItem = null;
+
+        // Show series again
+        IsSeriesSelectionVisible = true;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
