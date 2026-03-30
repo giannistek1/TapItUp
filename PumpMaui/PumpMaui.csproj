@@ -24,7 +24,7 @@
         <ApplicationTitle>PumpMaui</ApplicationTitle>
 
         <!-- App Identifier -->
-        <ApplicationId>com.companyname.pumpmaui</ApplicationId>
+        <ApplicationId>nl.djannie.pumpmaui</ApplicationId>
 
         <!-- Versions -->
         <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
@@ -89,8 +89,8 @@
         <!-- Raw Assets (also remove the "Resources\Raw" prefix) -->
         <MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
 
-        <!-- Add your song files as embedded resources -->
-        <MauiAsset Include="Songs\**" />
+
+        <MauiAsset Include="Songs\**\*.*" LogicalName="Songs/%(RecursiveDir)%(Filename)%(Extension)" />
     </ItemGroup>
 
     <ItemGroup>

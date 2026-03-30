@@ -156,6 +156,12 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
         System.Diagnostics.Debug.WriteLine($"🎮 Scroll speed changed to: {ScrollSpeed:F1}x");
     }
 
+    private async Task LoadAfterRender()
+    {
+        await Task.Delay(100); // let UI fully attach
+        await LoadEmbeddedSongs();
+    }
+
     private async Task LoadEmbeddedSongs()
     {
         try
@@ -184,16 +190,29 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
                         {
                             _songsBySeries[series] = new List<SscSong>();
 
+                            // Attempt to load banner safely now (not deferred inside ImageSource lambda)
+                            ImageSource? bannerImage = null;
+                            var bannerPath = $"banner_{series.Replace(" ", "").ToLower()}.png";
+
+                            try
+                            {
+                                await using var bannerStream = await FileSystem.OpenAppPackageFileAsync(bannerPath);
+                                // Copy into memory so the stream can be used later on the UI thread without further async work
+                                var ms = new MemoryStream();
+                                await bannerStream.CopyToAsync(ms);
+                                ms.Position = 0;
+                                bannerImage = ImageSource.FromStream(() => ms);
+                            }
+                            catch (Exception ex)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"❌ Failed to load banner '{bannerPath}': {ex.Message}");
+                                bannerImage = null;
+                            }
+
                             GameSeriesList.Add(new GameSeriesItem
                             {
                                 Name = series,
-                                Banner = ImageSource.FromStream(() =>
-                                {
-                                    return FileSystem
-                                        .OpenAppPackageFileAsync($"banner_{series.Replace(" ", "").ToLower()}.png")
-                                        .GetAwaiter()
-                                        .GetResult();
-                                })
+                                Banner = bannerImage
                             });
                         }
 
@@ -216,13 +235,21 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
             // Show a message if no songs were loaded
             if (loadedCount == 0)
             {
-                await DisplayAlert("No Songs", "No embedded songs could be loaded. Please check that the song files are included in your project.", "OK");
+                await MainThread.InvokeOnMainThreadAsync(async () =>
+                {
+                    await Task.Delay(50);
+                    await DisplayAlert("No Songs", "No embedded songs could be loaded. Please check that the song files are included in your project.", "OK");
+                });
             }
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"❌ Failed to load embedded songs: {ex.Message}");
-            await DisplayAlert("Error", $"Failed to load songs: {ex.Message}", "OK");
+            await MainThread.InvokeOnMainThreadAsync(async () =>
+            {
+                await Task.Delay(50);
+                await DisplayAlert("Error", $"Failed to load songs: {ex.Message}", "OK");
+            });
         }
     }
 
@@ -649,12 +676,12 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
         System.Diagnostics.Debug.WriteLine("🎵 Selection cleared by user");
     }
 
-    protected override async void OnAppearing()
+    protected override void OnAppearing()
     {
         base.OnAppearing();
         if (SongList.Count == 0)
         {
-            await LoadEmbeddedSongs();
+            _ = LoadAfterRender();
         }
     }
 
