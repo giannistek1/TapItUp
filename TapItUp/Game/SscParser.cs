@@ -12,6 +12,7 @@ public static class SscParser
         var globalTags = parser.ParseGlobalTags();
         var bpmChanges = ParseBpmString(globalTags.Get("BPMS"));
         var tickCounts = ParseTickCountString(globalTags.Get("TICKCOUNTS"));
+        var speedChanges = ParseSpeedString(globalTags.Get("SPEEDS"));
         var charts = new List<SscChart>();
 
         foreach (var noteDataSection in parser.EnumerateNoteDataSections())
@@ -31,6 +32,7 @@ public static class SscParser
             OffsetSeconds = globalTags.GetDouble("OFFSET", 0),
             BpmChanges = bpmChanges,
             TickCounts = tickCounts,
+            SpeedChanges = speedChanges,
             Charts = charts,
             SourcePath = sourcePath,
             MusicPath = globalTags.Get("MUSIC", globalTags.Get("SONG", "")),
@@ -410,6 +412,43 @@ public static class SscParser
         }
 
         if (result.Count == 0) result.Add(new TickCount(0d, 4));
+        return result;
+    }
+
+    /// <summary>
+    /// Parses a #SPEEDS string such as "0.000000=0.250000=0.000000=0"
+    /// into a list of <see cref="SpeedChange"/> segments.
+    /// Format: beat=speedMultiplier=duration=mode
+    /// - beat: when the speed change occurs
+    /// - speedMultiplier: visual scroll speed multiplier (e.g., 0.25 = 4x slower)
+    /// - duration: how long the change lasts in beats (0 = infinite/until next change)
+    /// - mode: 0 = constant, other values for different interpolation modes
+    /// Defaults to 1.0x speed (no change) if the tag is absent.
+    /// </summary>
+    private static List<SpeedChange> ParseSpeedString(string? speedText)
+    {
+        var result = new List<SpeedChange>();
+        if (string.IsNullOrWhiteSpace(speedText))
+        {
+            result.Add(new SpeedChange(0d, 1.0d, 0d, 0));
+            return result;
+        }
+
+        foreach (var part in speedText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var segments = part.Split('=');
+            if (segments.Length >= 2 &&
+                double.TryParse(segments[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var beat) &&
+                double.TryParse(segments[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var speedMult))
+            {
+                var duration = segments.Length >= 3 && double.TryParse(segments[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : 0d;
+                var mode = segments.Length >= 4 && int.TryParse(segments[3], out var m) ? m : 0;
+
+                result.Add(new SpeedChange(beat, speedMult, duration, mode));
+            }
+        }
+
+        if (result.Count == 0) result.Add(new SpeedChange(0d, 1.0d, 0d, 0));
         return result;
     }
 

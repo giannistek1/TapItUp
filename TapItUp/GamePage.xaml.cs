@@ -291,6 +291,7 @@ public partial class GamePage : ContentPage
         var previousMissCombo = _engine.MissCombo;
         var previousJudgment = _engine.LastJudgmentText;
         var previousTimeSeconds = _engine.CurrentTimeSeconds;
+        var wasPlaying = _engine.IsPlaying;
 
         _engine.Update(engineTime);
 
@@ -310,8 +311,10 @@ public partial class GamePage : ContentPage
             LandscapeNoteFieldView?.Invalidate();
         }
 
-        if (!_engine.IsPlaying && _playbackTimer.IsRunning)
+        // Check if the game just ended (was playing, now stopped)
+        if (wasPlaying && !_engine.IsPlaying)
         {
+            System.Diagnostics.Debug.WriteLine("🎮 Game ended - navigating to results");
             _playbackTimer.Stop();
 
             var resultsData = new GameResultsData

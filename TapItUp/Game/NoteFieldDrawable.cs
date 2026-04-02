@@ -405,6 +405,9 @@ public sealed class NoteFieldDrawable : IDrawable
         float x = laneGap;
         var travelHeight = fieldBottom - receptorY - 18f;
 
+        // Get the current chart-defined scroll speed from #SPEEDS
+        var chartScrollSpeed = _engine.CurrentScrollSpeedMultiplier;
+
         for (var lane = 0; lane < 5; lane++)
         {
             float width = actualWidths[lane];
@@ -432,10 +435,10 @@ public sealed class NoteFieldDrawable : IDrawable
                 // Skip holds that have fully passed (use the widest possible bad window for culling)
                 if (endDelta < -PhoenixScoring.GetBadWindow(JudgmentDifficulty.Standard)) continue;
 
-                // Calculate actual scroll window based on multiplier (inverted relationship) - extended for landscape
+                // Calculate actual scroll window based on BOTH multipliers
                 var actualScrollWindow = IsLandscapeMode ?
-                    3.0 / ScrollSpeedMultiplier :  // Extended for landscape
-                    2.2 / ScrollSpeedMultiplier;   // Original for portrait
+                    (3.0 / ScrollSpeedMultiplier) / chartScrollSpeed :
+                    (2.2 / ScrollSpeedMultiplier) / chartScrollSpeed;
 
                 // Calculate positions
                 var startNormalized = (float)(startDelta / actualScrollWindow);
@@ -512,7 +515,6 @@ public sealed class NoteFieldDrawable : IDrawable
             x += width + laneGap;
         }
     }
-
 
     private void DrawReceptors(ICanvas canvas, float[] actualWidths, float laneGap, float receptorY)
     {
@@ -756,10 +758,14 @@ public sealed class NoteFieldDrawable : IDrawable
         float x = laneGap;
         var travelHeight = fieldBottom - receptorY - 18f;
 
-        // Calculate the actual scroll window based on the speed multiplier - extended for landscape
+        // Get the current chart-defined scroll speed from #SPEEDS
+        var chartScrollSpeed = _engine.CurrentScrollSpeedMultiplier;
+
+        // Calculate the actual scroll window based on BOTH the user's multiplier AND chart speed
+        // Chart speed multiplier affects the window inversely (lower speed = more time visible)
         var actualScrollWindow = IsLandscapeMode ?
-            3.0 / ScrollSpeedMultiplier :  // Extended scroll window for landscape - more time to read patterns
-            2.2 / ScrollSpeedMultiplier;   // Original for portrait
+            (3.0 / ScrollSpeedMultiplier) / chartScrollSpeed :  // Apply both multipliers
+            (2.2 / ScrollSpeedMultiplier) / chartScrollSpeed;
 
         for (var lane = 0; lane < 5; lane++)
         {

@@ -1,5 +1,11 @@
 namespace TapItUp.Game;
 
+/// <summary>
+/// Represents a visual scroll speed multiplier change at a specific beat.
+/// Format: beat=speedMultiplier=duration=mode
+/// </summary>
+public readonly record struct SpeedChange(double Beat, double SpeedMultiplier, double Duration = 0, int Mode = 0);
+
 public sealed class SscSong
 {
     public string Title { get; init; } = "Unknown Title";
@@ -15,6 +21,11 @@ public sealed class SscSong
     /// starting at a given beat position. Defaults to 4 ticks/beat if absent.
     /// </summary>
     public IReadOnlyList<TickCount> TickCounts { get; init; } = [];
+    /// <summary>
+    /// Parsed from #SPEEDS. Defines visual scroll speed modifiers at specific beats.
+    /// Does NOT affect note timing — only how fast notes visually move on screen.
+    /// </summary>
+    public IReadOnlyList<SpeedChange> SpeedChanges { get; init; } = [];
     public IReadOnlyList<SscChart> Charts { get; init; } = [];
     public string? SourcePath { get; init; }
     public string BaseUrl { get; set; } = string.Empty;

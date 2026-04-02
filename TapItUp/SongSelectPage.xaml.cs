@@ -281,6 +281,11 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
         var loadedCount = 0;
         var errorCount = 0;
 
+        // Show loading UI immediately before scanning
+        SetLoadingVisible(true);
+        LoadingLabelPortrait.Text = "Scanning folder... This may take a minute.";
+        LoadingLabelLandscape.Text = "Scanning folder... This may take a minute.";
+
         List<TapItUp.Platforms.Android.ScanResult> scanResults;
         try
         {
@@ -289,22 +294,47 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
         }
         catch (Exception ex)
         {
+            SetLoadingVisible(false);
             await DisplayAlert("Error", $"Failed to scan folder: {ex.Message}", "OK");
             return;
         }
 
         if (scanResults.Count == 0)
         {
+            SetLoadingVisible(false);
             await DisplayAlert("No Songs Found",
                 "No .ssc files were found.\n\nExpected structure:\n  Root / Game Series / Song / song.ssc",
                 "OK");
             return;
         }
 
+        var progress = new Progress<LoadProgress>(p => MainThread.BeginInvokeOnMainThread(() =>
+        {
+            var text = $"{p.Message} ({p.Current}/{p.Total})";
+            LoadingLabelPortrait.Text = text;
+            LoadingProgressBarPortrait.Progress = p.Percentage;
+            LoadingLabelLandscape.Text = text;
+            LoadingProgressBarLandscape.Progress = p.Percentage;
+        }));
+
+        var i = 0;
         foreach (var result in scanResults)
         {
             try
             {
+                i++;
+                var songName = Path.GetFileNameWithoutExtension(result.SscUri);
+                
+                // Decode URL-encoded characters (e.g., %20 -> space)
+                songName = Uri.UnescapeDataString(songName);
+
+                ((IProgress<LoadProgress>)progress).Report(new LoadProgress
+                {
+                    Message = $"Loading {songName}...",
+                    Current = i,
+                    Total = scanResults.Count
+                });
+
                 var content = await TapItUp.Platforms.Android.AndroidSafScanner.ReadTextAsync(context, result.SscUri);
                 var song = SscParser.Parse(content, result.SscUri);
                 song.SongDocumentUri = result.SongDocumentUri;
@@ -328,6 +358,8 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
                 System.Diagnostics.Debug.WriteLine($"[SongSelect] SAF load failed for {result.SscUri}: {ex.Message}");
             }
         }
+
+        SetLoadingVisible(false);
 
         var message = loadedCount == 0
             ? "No songs with valid charts were found.\n\nExpected structure:\n  Root / Game Series / Song / song.ssc"
@@ -353,44 +385,108 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
                 return;
             }
 
+            // Show loading UI immediately before scanning
+            SetLoadingVisible(true);
+
+            // Count total songs first for progress tracking
+            var songDirectories = new List<(string SeriesDir, string SongDir, string SscFile)>();
             foreach (var seriesDir in Directory.GetDirectories(rootPath))
             {
-                var seriesName = Path.GetFileName(seriesDir).ToUpperInvariant();
-
                 foreach (var songDir in Directory.GetDirectories(seriesDir))
                 {
                     var sscFiles = Directory.GetFiles(songDir, "*.ssc");
-                    if (sscFiles.Length == 0) continue;
 
-                    try
+                    // If no exact match found, try removing parenthetical prefix from directory name
+                    if (sscFiles.Length == 0)
                     {
-                        var content = await File.ReadAllTextAsync(sscFiles[0]);
-                        var song = SscParser.Parse(content, sscFiles[0]);
-                        if (song.Charts.Count == 0) continue;
+                        var dirName = Path.GetFileName(songDir);
+                        // Remove patterns like (1), (2), (1a), (3) etc. from the start
+                        var cleanedName = System.Text.RegularExpressions.Regex.Replace(
+                            dirName,
+                            @"^\(\d+[a-z]?\)\s*",
+                            "",
+                            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
-                        var bannerPath = new[] {
-                            Path.Combine(seriesDir, "banner.png"),
-                            Path.Combine(seriesDir, "banner.jpg"),
-                        }.FirstOrDefault(File.Exists);
+                        if (cleanedName != dirName)
+                        {
+                            var expectedSscPath = Path.Combine(songDir, $"{cleanedName}.ssc");
+                            if (File.Exists(expectedSscPath))
+                                sscFiles = new[] { expectedSscPath };
+                        }
+                    }
 
-                        AddSongToSeries(song, seriesName, bannerPath);
-                        loadedCount++;
-                    }
-                    catch (Exception ex)
-                    {
-                        errorCount++;
-                        System.Diagnostics.Debug.WriteLine($"[SongSelect] Failed to load {sscFiles[0]}: {ex.Message}");
-                    }
+                    if (sscFiles.Length > 0)
+                        songDirectories.Add((seriesDir, songDir, sscFiles[0]));
                 }
             }
+
+            if (songDirectories.Count == 0)
+            {
+                SetLoadingVisible(false);
+                await DisplayAlert("No Songs Found",
+                    "No .ssc files were found.\n\nExpected structure:\n  Root / Game Series / Song / song.ssc",
+                    "OK");
+                return;
+            }
+
+            var progress = new Progress<LoadProgress>(p => MainThread.BeginInvokeOnMainThread(() =>
+            {
+                var text = $"{p.Message} ({p.Current}/{p.Total})";
+                LoadingLabelPortrait.Text = text;
+                LoadingProgressBarPortrait.Progress = p.Percentage;
+                LoadingLabelLandscape.Text = text;
+                LoadingProgressBarLandscape.Progress = p.Percentage;
+            }));
+
+            var i = 0;
+            foreach (var (seriesDir, songDir, sscFile) in songDirectories)
+            {
+                try
+                {
+                    i++;
+                    var seriesName = Path.GetFileName(seriesDir).ToUpperInvariant();
+                    var songName = Path.GetFileNameWithoutExtension(sscFile);
+
+                    // Decode URL-encoded characters (e.g., %20 -> space)
+                    songName = Uri.UnescapeDataString(songName);
+
+                    ((IProgress<LoadProgress>)progress).Report(new LoadProgress
+                    {
+                        Message = $"Loading {songName}...",
+                        Current = i,
+                        Total = songDirectories.Count
+                    });
+
+                    var content = await File.ReadAllTextAsync(sscFile);
+                    var song = SscParser.Parse(content, sscFile);
+                    if (song.Charts.Count == 0) continue;
+
+                    var bannerPath = new[] {
+                        Path.Combine(seriesDir, "banner.png"),
+                        Path.Combine(seriesDir, "banner.jpg"),
+                    }.FirstOrDefault(File.Exists);
+
+                    AddSongToSeries(song, seriesName, bannerPath);
+                    loadedCount++;
+                }
+                catch (Exception ex)
+                {
+                    errorCount++;
+                    System.Diagnostics.Debug.WriteLine($"[SongSelect] Failed to load {sscFile}: {ex.Message}");
+                }
+            }
+
+            SetLoadingVisible(false);
         }
         catch (UnauthorizedAccessException)
         {
+            SetLoadingVisible(false);
             await DisplayAlert("Permission Denied", $"Cannot read:\n{rootPath}", "OK");
             return;
         }
         catch (Exception ex)
         {
+            SetLoadingVisible(false);
             await DisplayAlert("Error", $"Failed to scan folder: {ex.Message}", "OK");
             return;
         }
