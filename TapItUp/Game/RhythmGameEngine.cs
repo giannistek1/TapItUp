@@ -284,15 +284,19 @@ public sealed class RhythmGameEngine
             _pendingChords.RemoveAt(ci);
         }
 
-        // --- Regular note processing ---
-        // Notes that belong to an active PendingChord must not be auto-missed here;
-        // their fate is decided by the chord expiry above or by completion in HandleLaneHit.
+        // --- Regular note processing (with chord grouping for auto-miss) ---
         var pendingNotes = _pendingChords.SelectMany(c => c.Notes).ToHashSet();
 
-        foreach (var note in _notes.Where(n => !n.Consumed && !n.Missed))
+        // Group notes that should be treated as chords for auto-miss
+        var missedNotes = _notes
+            .Where(n => !n.Consumed && !n.Missed && !pendingNotes.Contains(n))
+            .ToList();
+
+        var processedThisFrame = new HashSet<PlayableNote>();
+
+        foreach (var note in missedNotes)
         {
-            // Skip notes that are waiting inside a pending chord
-            if (pendingNotes.Contains(note)) continue;
+            if (processedThisFrame.Contains(note)) continue;
 
             var delta = elapsedSeconds - note.TimeSeconds;
 
@@ -301,24 +305,43 @@ public sealed class RhythmGameEngine
             {
                 if (delta >= -PreHoldAcceptanceSeconds && delta <= badWindow)
                 {
-                    ActivateHold(note);
-                    RegisterJudgment(HitJudgment.Perfect);
+                    // Check if this hold-start is part of a chord
+                    var chordMembers = missedNotes
+                        .Where(n => !processedThisFrame.Contains(n) &&
+                                    n.Type == NoteType.HoldStart &&
+                                    Math.Abs(n.TimeSeconds - note.TimeSeconds) <= ChordWindowSeconds)
+                        .ToList();
+
+                    if (chordMembers.Count == 1)
+                    {
+                        // Solo hold-start — activate immediately
+                        ActivateHold(note);
+                        RegisterJudgment(HitJudgment.Perfect);
+                        processedThisFrame.Add(note);
+                    }
+                    else
+                    {
+                        // Multi-hold chord — only consume if ALL lanes are pressed
+                        var allPressed = chordMembers.All(m => _lanePressed[m.Lane]);
+                        if (allPressed)
+                        {
+                            foreach (var member in chordMembers)
+                            {
+                                ActivateHold(member);
+                                processedThisFrame.Add(member);
+                            }
+                            RegisterJudgment(HitJudgment.Perfect);
+                        }
+                        // If not all pressed, let them continue scrolling; they'll form a PendingChord
+                        // when the first lane is hit, or auto-miss if all are ignored
+                    }
+
                     continue;
                 }
             }
 
-            // Auto-miss: note has passed the bad window (only solo notes reach here)
-            if (delta > badWindow)
-            {
-                note.Consumed = true;
-                note.Missed = true;
-
-                if (note.Type == NoteType.HoldStart)
-                    _laneHoldActive[note.Lane] = false;
-
-                RegisterJudgment(HitJudgment.Miss);
-            }
-            else if (note.Type == NoteType.HoldEnd && _laneHoldActive[note.Lane])
+            // Handle hold-end notes for active holds
+            if (note.Type == NoteType.HoldEnd && _laneHoldActive[note.Lane])
             {
                 if (Math.Abs(delta) <= badWindow)
                 {
@@ -326,6 +349,7 @@ public sealed class RhythmGameEngine
                     _laneHoldActive[note.Lane] = false;
                     if (note.HoldPartner != null) note.HoldPartner.IsHoldActive = false;
                     RegisterJudgment(HitJudgment.Perfect);
+                    processedThisFrame.Add(note);
                 }
                 else if (delta > badWindow)
                 {
@@ -334,7 +358,35 @@ public sealed class RhythmGameEngine
                     _laneHoldActive[note.Lane] = false;
                     if (note.HoldPartner != null) note.HoldPartner.IsHoldActive = false;
                     RegisterJudgment(HitJudgment.Bad);
+                    processedThisFrame.Add(note);
                 }
+                continue; // Skip chord grouping for hold-end notes
+            }
+
+            // Auto-miss: tap/hold-start note has passed the bad window
+            if (delta > badWindow && (note.Type == NoteType.Tap || note.Type == NoteType.HoldStart))
+            {
+                // Find all simultaneous notes (chord) that also need to be missed
+                var chordMembers = missedNotes
+                    .Where(n => !processedThisFrame.Contains(n) &&
+                                (n.Type == NoteType.Tap || n.Type == NoteType.HoldStart) &&
+                                Math.Abs(n.TimeSeconds - note.TimeSeconds) <= ChordWindowSeconds)
+                    .ToList();
+
+                // Mark all chord members as consumed and missed
+                foreach (var member in chordMembers)
+                {
+                    member.Consumed = true;
+                    member.Missed = true;
+
+                    if (member.Type == NoteType.HoldStart)
+                        _laneHoldActive[member.Lane] = false;
+
+                    processedThisFrame.Add(member);
+                }
+
+                // Register only ONE miss for the entire chord
+                RegisterJudgment(HitJudgment.Miss);
             }
         }
 

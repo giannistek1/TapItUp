@@ -120,7 +120,7 @@
                             </Picker.Items>
                         </Picker>
                         <Label Grid.Column="2"
-                               Text="Judgement"
+                               Text="Judge"
                                FontSize="{OnPlatform Default=14, iOS=12, Android=12}"
                                FontAttributes="Bold"
                                TextColor="#FCE3FF"
@@ -131,7 +131,7 @@
                                 TitleColor="#8C76B5"
                                 FontSize="{OnPlatform Default=14, iOS=12, Android=12}"
                                 HeightRequest="{OnPlatform Default=40, iOS=35, Android=35}"
-                                WidthRequest="90">
+                                WidthRequest="110">
                             <Picker.Items>
                                 <x:String>Standard</x:String>
                                 <x:String>Hard</x:String>
@@ -172,72 +172,6 @@
                            IsVisible="{Binding IsSearchActive}" />
                 </Grid>
             </Border>
-
-            <!-- Search results — shown when IsSearchActive, hidden otherwise -->
-            <CollectionView Grid.Row="5"
-                            x:Name="PortraitSearchResultsView"
-                            ItemsSource="{Binding SearchResults}"
-                            SelectionMode="Single"
-                            SelectionChanged="OnSongSelected"
-                            ItemsLayout="VerticalList"
-                            IsVisible="{Binding IsSearchActive}">
-                <CollectionView.EmptyView>
-                    <Label Text="No songs match your search."
-                           TextColor="#8C76B5"
-                           FontSize="{OnPlatform Default=14, iOS=12, Android=12}"
-                           HorizontalTextAlignment="Center"
-                           VerticalTextAlignment="Center"
-                           Margin="0,40" />
-                </CollectionView.EmptyView>
-                <CollectionView.ItemTemplate>
-                    <DataTemplate>
-                        <Border Margin="0,1,0,1"
-                                Padding="6,4,6,4"
-                                Stroke="#4C327C"
-                                StrokeThickness="1"
-                                Background="#1A102A"
-                                StrokeShape="RoundRectangle 6">
-                            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" RowSpacing="1">
-                                <Image Grid.RowSpan="3" Grid.ColumnSpan="2"
-                                       Source="{Binding BackgroundImageSource}"
-                                       Aspect="AspectFill"
-                                       Opacity="0.2"
-                                       HorizontalOptions="FillAndExpand"
-                                       VerticalOptions="FillAndExpand" />
-                                <BoxView Grid.RowSpan="3" Grid.ColumnSpan="2"
-                                         BackgroundColor="#1A102A"
-                                         Opacity="0.2" />
-                                <Label Grid.Row="0" Grid.Column="0"
-                                       Text="{Binding Title}"
-                                       FontAttributes="Bold"
-                                       FontSize="{OnPlatform Default=14, iOS=12, Android=12}"
-                                       TextColor="#FFF4FF"
-                                       LineBreakMode="TailTruncation"
-                                       MaxLines="1" />
-                                <Label Grid.Row="1" Grid.Column="0"
-                                       Text="{Binding Artist}"
-                                       FontSize="{OnPlatform Default=11, iOS=9, Android=9}"
-                                       TextColor="#D0B7FF"
-                                       LineBreakMode="TailTruncation"
-                                       MaxLines="1" />
-                                <Label Grid.Row="2" Grid.Column="0"
-                                       Text="{Binding ChartSummary}"
-                                       FontSize="{OnPlatform Default=10, iOS=8, Android=8}"
-                                       TextColor="#FFE76A"
-                                       LineBreakMode="TailTruncation"
-                                       MaxLines="1" />
-                                <Label Grid.Row="0" Grid.Column="1"
-                                       Grid.RowSpan="3"
-                                       Text="▶"
-                                       FontSize="{OnPlatform Default=16, iOS=14, Android=14}"
-                                       TextColor="#D94BFF"
-                                       VerticalTextAlignment="Center"
-                                       Margin="6,0,0,0" />
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </CollectionView.ItemTemplate>
-            </CollectionView>
 
             <!-- Series selector — hidden while searching -->
             <CollectionView Grid.Row="5"
@@ -340,16 +274,74 @@
                 </CollectionView.ItemTemplate>
             </CollectionView>
 
-            <Button Grid.Row="6"
-                    Text="← Back to Series"
-                    Clicked="OnBackToSeriesClicked"
-                    BackgroundColor="#5D42E6"
-                    TextColor="White"
-                    CornerRadius="10"
-                    IsVisible="{Binding IsSongListVisible}" />
+            <!-- Search results — shown when IsSearchActive, hidden otherwise (declared last = renders on top) -->
+            <CollectionView Grid.Row="5"
+                            x:Name="PortraitSearchResultsView"
+                            ItemsSource="{Binding SearchResults}"
+                            SelectionMode="Single"
+                            SelectionChanged="OnSongSelected"
+                            ItemsLayout="VerticalList"
+                            IsVisible="{Binding IsSearchActive}">
+                <CollectionView.EmptyView>
+                    <Label Text="No songs match your search."
+                           TextColor="#8C76B5"
+                           FontSize="{OnPlatform Default=14, iOS=12, Android=12}"
+                           HorizontalTextAlignment="Center"
+                           VerticalTextAlignment="Center"
+                           Margin="0,40" />
+                </CollectionView.EmptyView>
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Border Margin="0,1,0,1"
+                                Padding="6,4,6,4"
+                                Stroke="#4C327C"
+                                StrokeThickness="1"
+                                Background="#1A102A"
+                                StrokeShape="RoundRectangle 6">
+                            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" RowSpacing="1">
+                                <Image Grid.RowSpan="3" Grid.ColumnSpan="2"
+                                       Source="{Binding BackgroundImageSource}"
+                                       Aspect="AspectFill"
+                                       Opacity="0.2"
+                                       HorizontalOptions="FillAndExpand"
+                                       VerticalOptions="FillAndExpand" />
+                                <BoxView Grid.RowSpan="3" Grid.ColumnSpan="2"
+                                         BackgroundColor="#1A102A"
+                                         Opacity="0.2" />
+                                <Label Grid.Row="0" Grid.Column="0"
+                                       Text="{Binding Title}"
+                                       FontAttributes="Bold"
+                                       FontSize="{OnPlatform Default=14, iOS=12, Android=12}"
+                                       TextColor="#FFF4FF"
+                                       LineBreakMode="TailTruncation"
+                                       MaxLines="1" />
+                                <Label Grid.Row="1" Grid.Column="0"
+                                       Text="{Binding Artist}"
+                                       FontSize="{OnPlatform Default=11, iOS=9, Android=9}"
+                                       TextColor="#D0B7FF"
+                                       LineBreakMode="TailTruncation"
+                                       MaxLines="1" />
+                                <Label Grid.Row="2" Grid.Column="0"
+                                       Text="{Binding ChartSummary}"
+                                       FontSize="{OnPlatform Default=10, iOS=8, Android=8}"
+                                       TextColor="#FFE76A"
+                                       LineBreakMode="TailTruncation"
+                                       MaxLines="1" />
+                                <Label Grid.Row="0" Grid.Column="1"
+                                       Grid.RowSpan="3"
+                                       Text="▶"
+                                       FontSize="{OnPlatform Default=16, iOS=14, Android=14}"
+                                       TextColor="#D94BFF"
+                                       VerticalTextAlignment="Center"
+                                       Margin="6,0,0,0" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
 
-            <!-- Selected song / chart panel -->
-            <Border Grid.Row="7"
+            <!-- Selected song / chart panel — NOW IN ROW 6 -->
+            <Border Grid.Row="6"
                     Background="#140A29"
                     Stroke="#3E2B72"
                     StrokeThickness="2"
@@ -441,6 +433,15 @@
                             VerticalOptions="Center" />
                 </Grid>
             </Border>
+
+            <!-- Back button — NOW IN ROW 7 (bottom) -->
+            <Button Grid.Row="7"
+                    Text="← Back to Series"
+                    Clicked="OnBackToSeriesClicked"
+                    BackgroundColor="#5D42E6"
+                    TextColor="White"
+                    CornerRadius="10"
+                    IsVisible="{Binding IsSongListVisible}" />
         </Grid>
 
         <!-- Landscape Layout -->
@@ -481,45 +482,86 @@
                              ProgressColor="#D94BFF"/>
             </VerticalStackLayout>
 
-            <!-- Settings bar: navigation, load, speed, skin, judgement, search -->
+            <!-- Settings bar: Row 0 = navigation/load/search, Row 1 = speed/skin/judgement -->
             <Grid Grid.Row="2"
-                  ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto,Auto,Auto"
-                  ColumnSpacing="8"
+                  RowDefinitions="Auto,Auto"
+                  RowSpacing="4"
                   Margin="0,0,0,6">
-                <Button Grid.Column="0"
-                        Text="← Series"
-                        Clicked="OnBackToSeriesClicked"
-                        IsVisible="{Binding IsSongListVisible}"
-                        BackgroundColor="#5D42E6"
-                        TextColor="White"
-                        CornerRadius="8"
-                        WidthRequest="90"
-                        HeightRequest="35"
-                        FontSize="12" />
-                <Button Grid.Column="1"
-                        Text="📁 Folder"
-                        Clicked="OnOpenFolderClicked"
-                        BackgroundColor="#5D42E6"
-                        TextColor="White"
-                        CornerRadius="8"
-                        WidthRequest="90"
-                        HeightRequest="35"
-                        FontSize="12" />
-                <Button Grid.Column="2"
-                        x:Name="LoadRemoteButtonLandscape"
-                        Text="Load URL"
-                        Clicked="OnLoadRemoteClicked"
-                        CornerRadius="8"
-                        HeightRequest="35"
-                        FontSize="12"
-                        WidthRequest="90" />
-                <Border Grid.Column="3"
+
+                <!-- Row 0: Navigation, load buttons, search -->
+                <Grid Grid.Row="0"
+                      ColumnDefinitions="Auto,Auto,Auto,*,Auto"
+                      ColumnSpacing="8">
+                    <Button Grid.Column="0"
+                            Text="← Series"
+                            Clicked="OnBackToSeriesClicked"
+                            IsVisible="{Binding IsSongListVisible}"
+                            BackgroundColor="#5D42E6"
+                            TextColor="White"
+                            CornerRadius="8"
+                            WidthRequest="90"
+                            HeightRequest="35"
+                            FontSize="12" />
+                    <Button Grid.Column="1"
+                            Text="📁 Folder"
+                            Clicked="OnOpenFolderClicked"
+                            BackgroundColor="#5D42E6"
+                            TextColor="White"
+                            CornerRadius="8"
+                            WidthRequest="90"
+                            HeightRequest="35"
+                            FontSize="12" />
+                    <Button Grid.Column="2"
+                            x:Name="LoadRemoteButtonLandscape"
+                            Text="Load URL"
+                            Clicked="OnLoadRemoteClicked"
+                            CornerRadius="8"
+                            HeightRequest="35"
+                            FontSize="12"
+                            WidthRequest="90" />
+                    <!-- Search — stretches to fill remaining space -->
+                    <Border Grid.Column="3"
+                            Background="#1A102A"
+                            Stroke="#4C327C"
+                            StrokeThickness="1"
+                            StrokeShape="RoundRectangle 8"
+                            Padding="6,2">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="4">
+                            <Label Grid.Column="0"
+                                   Text="🔍"
+                                   FontSize="14"
+                                   TextColor="#8C76B5"
+                                   VerticalTextAlignment="Center" />
+                            <Entry Grid.Column="1"
+                                   x:Name="LandscapeSearchEntry"
+                                   Placeholder="Search all songs…"
+                                   Text="{Binding SearchText}"
+                                   TextChanged="OnSearchTextChanged"
+                                   PlaceholderColor="#8C76B5"
+                                   TextColor="#FFF4FF"
+                                   BackgroundColor="Transparent"
+                                   FontSize="12"
+                                   ClearButtonVisibility="WhileEditing" />
+                            <Label Grid.Column="2"
+                                   Text="{Binding SearchResults.Count, StringFormat='{0} results'}"
+                                   FontSize="11"
+                                   TextColor="#8C76B5"
+                                   VerticalTextAlignment="Center"
+                                   IsVisible="{Binding IsSearchActive}" />
+                        </Grid>
+                    </Border>
+                    <!-- Results count badge -->
+                </Grid>
+
+                <!-- Row 1: Speed, skin, judgement -->
+                <Border Grid.Row="1"
                         Background="#1A102A"
                         Stroke="#4C327C"
                         StrokeThickness="1"
-                        Padding="8,4"
-                        StrokeShape="RoundRectangle 6">
-                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="6">
+                        StrokeShape="RoundRectangle 8"
+                        Padding="8,4">
+                    <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto"
+                          ColumnSpacing="10">
                         <Label Grid.Column="0"
                                Text="Speed"
                                FontSize="12"
@@ -544,71 +586,45 @@
                                VerticalTextAlignment="Center"
                                MinimumWidthRequest="30"
                                HorizontalTextAlignment="Center" />
-                    </Grid>
-                </Border>
-                <Label Grid.Column="4"
-                       Text="Skin"
-                       FontSize="12"
-                       FontAttributes="Bold"
-                       TextColor="#FCE3FF"
-                       VerticalTextAlignment="Center" />
-                <Picker Grid.Column="5"
-                        x:Name="NoteSkinPickerLandscape"
-                        SelectedItem="{Binding NoteSkin}"
-                        TextColor="#FFF4FF"
-                        TitleColor="#8C76B5"
-                        FontSize="12"
-                        HeightRequest="35"
-                        WidthRequest="100">
-                    <Picker.Items>
-                        <x:String>Prime</x:String>
-                        <x:String>Fiesta2</x:String>
-                        <x:String>Old</x:String>
-                        <x:String>NXA</x:String>
-                    </Picker.Items>
-                </Picker>
-                <Label Grid.Column="6"
-                       Text="Judgement"
-                       FontSize="12"
-                       FontAttributes="Bold"
-                       TextColor="#FCE3FF"
-                       VerticalTextAlignment="Center" />
-                <Picker Grid.Column="7"
-                        SelectedItem="{Binding JudgmentDifficultyString}"
-                        TextColor="#FFF4FF"
-                        TitleColor="#8C76B5"
-                        FontSize="12"
-                        HeightRequest="35"
-                        WidthRequest="90">
-                    <Picker.Items>
-                        <x:String>Standard</x:String>
-                        <x:String>Hard</x:String>
-                    </Picker.Items>
-                </Picker>
-                <!-- Search — inline in settings bar, ALWAYS visible -->
-                <Border Grid.Column="8"
-                        Background="#1A102A"
-                        Stroke="#4C327C"
-                        StrokeThickness="1"
-                        StrokeShape="RoundRectangle 8"
-                        Padding="6,2"
-                        WidthRequest="200">
-                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="4">
-                        <Label Grid.Column="0"
-                               Text="🔍"
-                               FontSize="14"
-                               TextColor="#8C76B5"
-                               VerticalTextAlignment="Center" />
-                        <Entry Grid.Column="1"
-                               x:Name="LandscapeSearchEntry"
-                               Placeholder="Search all songs…"
-                               Text="{Binding SearchText}"
-                               TextChanged="OnSearchTextChanged"
-                               PlaceholderColor="#8C76B5"
-                               TextColor="#FFF4FF"
-                               BackgroundColor="Transparent"
+                        <Label Grid.Column="3"
+                               Text="Skin"
                                FontSize="12"
-                               ClearButtonVisibility="WhileEditing" />
+                               FontAttributes="Bold"
+                               TextColor="#FCE3FF"
+                               VerticalTextAlignment="Center" />
+                        <Picker Grid.Column="4"
+                                x:Name="NoteSkinPickerLandscape"
+                                SelectedItem="{Binding NoteSkin}"
+                                TextColor="#FFF4FF"
+                                TitleColor="#8C76B5"
+                                FontSize="12"
+                                HeightRequest="35"
+                                WidthRequest="100">
+                            <Picker.Items>
+                                <x:String>Prime</x:String>
+                                <x:String>Fiesta2</x:String>
+                                <x:String>Old</x:String>
+                                <x:String>NXA</x:String>
+                            </Picker.Items>
+                        </Picker>
+                        <Label Grid.Column="5"
+                               Text="Judge"
+                               FontSize="12"
+                               FontAttributes="Bold"
+                               TextColor="#FCE3FF"
+                               VerticalTextAlignment="Center" />
+                        <Picker Grid.Column="6"
+                                SelectedItem="{Binding JudgmentDifficultyString}"
+                                TextColor="#FFF4FF"
+                                TitleColor="#8C76B5"
+                                FontSize="12"
+                                HeightRequest="35"
+                                WidthRequest="110">
+                            <Picker.Items>
+                                <x:String>Standard</x:String>
+                                <x:String>Hard</x:String>
+                            </Picker.Items>
+                        </Picker>
                     </Grid>
                 </Border>
             </Grid>
@@ -678,80 +694,13 @@
                 </Grid>
             </Border>
 
-            <!-- Search results — landscape, shown when IsSearchActive -->
-            <CollectionView Grid.Row="4"
-                            x:Name="LandscapeSearchResultsView"
-                            ItemsSource="{Binding SearchResults}"
-                            SelectionMode="Single"
-                            SelectionChanged="OnSongSelected"
-                            ItemsLayout="HorizontalList"
-                            IsVisible="{Binding IsSearchActive}">
-                <CollectionView.EmptyView>
-                    <Label Text="No songs match your search."
-                           TextColor="#8C76B5"
-                           FontSize="12"
-                           HorizontalTextAlignment="Center"
-                           VerticalTextAlignment="Center" />
-                </CollectionView.EmptyView>
-                <CollectionView.ItemTemplate>
-                    <DataTemplate>
-                        <Border Margin="0,0,6,0"
-                                Padding="8"
-                                Stroke="#4C327C"
-                                StrokeThickness="1"
-                                Background="#1A102A"
-                                StrokeShape="RoundRectangle 8"
-                                WidthRequest="200"
-                                HeightRequest="90">
-                            <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="2">
-                                <Image Grid.RowSpan="4"
-                                       Source="{Binding BackgroundImageSource}"
-                                       Aspect="AspectFill"
-                                       Opacity="0.25"
-                                       HorizontalOptions="FillAndExpand"
-                                       VerticalOptions="FillAndExpand" />
-                                <BoxView Grid.RowSpan="4"
-                                         BackgroundColor="#1A102A"
-                                         Opacity="0.2" />
-                                <Label Grid.Row="0"
-                                       Text="{Binding Title}"
-                                       FontAttributes="Bold"
-                                       FontSize="12"
-                                       TextColor="#FFF4FF"
-                                       LineBreakMode="TailTruncation"
-                                       MaxLines="1" />
-                                <Label Grid.Row="1"
-                                       Text="{Binding Artist}"
-                                       FontSize="10"
-                                       TextColor="#D0B7FF"
-                                       LineBreakMode="TailTruncation"
-                                       MaxLines="1" />
-                                <Label Grid.Row="2"
-                                       Text="{Binding ChartSummary}"
-                                       FontSize="9"
-                                       TextColor="#FFE76A"
-                                       VerticalOptions="Center"
-                                       HorizontalTextAlignment="Center" />
-                                <Label Grid.Row="3"
-                                       Text="▶ SELECT"
-                                       FontSize="10"
-                                       FontAttributes="Bold"
-                                       TextColor="#D94BFF"
-                                       HorizontalTextAlignment="Center"
-                                       VerticalOptions="End" />
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </CollectionView.ItemTemplate>
-            </CollectionView>
-
             <!-- Series selector — landscape, hidden while searching -->
             <CollectionView Grid.Row="4"
-                            x:Name="LandscapeSeriesCollectionView"
-                            ItemsSource="{Binding GameSeriesList}"
-                            SelectionMode="Single"
-                            SelectionChanged="OnSeriesSelected"
-                            IsVisible="{Binding IsSeriesViewVisible}">
+                x:Name="LandscapeSeriesCollectionView"
+                ItemsSource="{Binding GameSeriesList}"
+                SelectionMode="Single"
+                SelectionChanged="OnSeriesSelected"
+                IsVisible="{Binding IsSeriesViewVisible}">
                 <CollectionView.ItemsLayout>
                     <LinearItemsLayout Orientation="Horizontal" ItemSpacing="12"/>
                 </CollectionView.ItemsLayout>
@@ -765,9 +714,7 @@
                                 WidthRequest="160"
                                 HeightRequest="100">
                             <Grid>
-                                <Image Source="{Binding Banner}" Aspect="AspectFill"
-                                       HorizontalOptions="Center"
-                                       VerticalOptions="Center" />
+                                <Image Source="{Binding Banner}" Aspect="AspectFill" HorizontalOptions="Center" VerticalOptions="Center" />
                                 <BoxView BackgroundColor="#000000" Opacity="0.4"/>
                                 <Label Text="{Binding Name}"
                                        TextColor="White"
@@ -784,65 +731,132 @@
 
             <!-- Song list — landscape, hidden while searching -->
             <CollectionView Grid.Row="4"
-                            x:Name="LandscapeSongListView"
-                            ItemsSource="{Binding SongList}"
-                            SelectionMode="Single"
-                            SelectionChanged="OnSongSelected"
-                            ItemsLayout="HorizontalList"
-                            IsVisible="{Binding IsSongListVisible}">
+                x:Name="LandscapeSongListView"
+                ItemsSource="{Binding SongList}"
+                SelectionMode="Single"
+                SelectionChanged="OnSongSelected"
+                ItemsLayout="HorizontalList"
+                IsVisible="{Binding IsSongListVisible}">
                 <CollectionView.EmptyView>
                     <Label Text="Loading song collection..."
-                           TextColor="#8C76B5"
-                           FontSize="12"
-                           HorizontalTextAlignment="Center"
-                           VerticalTextAlignment="Center" />
+               TextColor="#8C76B5"
+               FontSize="12"
+               HorizontalTextAlignment="Center"
+               VerticalTextAlignment="Center" />
                 </CollectionView.EmptyView>
                 <CollectionView.ItemTemplate>
                     <DataTemplate>
                         <Border Margin="0,0,6,0"
-                                Padding="8"
-                                Stroke="#4C327C"
-                                StrokeThickness="1"
-                                Background="#1A102A"
-                                StrokeShape="RoundRectangle 8"
-                                WidthRequest="200"
-                                HeightRequest="90">
+                    Padding="8"
+                    Stroke="#4C327C"
+                    StrokeThickness="1"
+                    Background="#1A102A"
+                    StrokeShape="RoundRectangle 8"
+                    WidthRequest="200"
+                    HeightRequest="90">
                             <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="2">
                                 <Image Grid.RowSpan="4"
-                                       Source="{Binding BackgroundImageSource}"
-                                       Aspect="AspectFill"
-                                       Opacity="0.25"
-                                       HorizontalOptions="FillAndExpand"
-                                       VerticalOptions="FillAndExpand" />
+                           Source="{Binding BackgroundImageSource}"
+                           Aspect="AspectFill"
+                           Opacity="0.25"
+                           HorizontalOptions="FillAndExpand"
+                           VerticalOptions="FillAndExpand" />
                                 <BoxView Grid.RowSpan="4"
-                                         BackgroundColor="#1A102A"
-                                         Opacity="0.2" />
+                             BackgroundColor="#1A102A"
+                             Opacity="0.2" />
                                 <Label Grid.Row="0"
-                                       Text="{Binding Title}"
-                                       FontAttributes="Bold"
-                                       FontSize="12"
-                                       TextColor="#FFF4FF"
-                                       LineBreakMode="TailTruncation"
-                                       MaxLines="1" />
+                           Text="{Binding Title}"
+                           FontAttributes="Bold"
+                           FontSize="12"
+                           TextColor="#FFF4FF"
+                           LineBreakMode="TailTruncation"
+                           MaxLines="1" />
                                 <Label Grid.Row="1"
-                                       Text="{Binding Artist}"
-                                       FontSize="10"
-                                       TextColor="#D0B7FF"
-                                       LineBreakMode="TailTruncation"
-                                       MaxLines="1" />
+                           Text="{Binding Artist}"
+                           FontSize="10"
+                           TextColor="#D0B7FF"
+                           LineBreakMode="TailTruncation"
+                           MaxLines="1" />
                                 <Label Grid.Row="2"
-                                       Text="{Binding ChartSummary}"
-                                       FontSize="9"
-                                       TextColor="#FFE76A"
-                                       VerticalOptions="Center"
-                                       HorizontalTextAlignment="Center" />
+                           Text="{Binding ChartSummary}"
+                           FontSize="9"
+                           TextColor="#FFE76A"
+                           VerticalOptions="Center"
+                           HorizontalTextAlignment="Center" />
                                 <Label Grid.Row="3"
-                                       Text="▶ SELECT"
-                                       FontSize="10"
-                                       FontAttributes="Bold"
-                                       TextColor="#D94BFF"
-                                       HorizontalTextAlignment="Center"
-                                       VerticalOptions="End" />
+                           Text="▶ SELECT"
+                           FontSize="10"
+                           FontAttributes="Bold"
+                           TextColor="#D94BFF"
+                           HorizontalTextAlignment="Center"
+                           VerticalOptions="End" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+            <!-- Search results — landscape, shown when IsSearchActive (declared last = renders on top) -->
+            <CollectionView Grid.Row="4"
+                x:Name="LandscapeSearchResultsView"
+                ItemsSource="{Binding SearchResults}"
+                SelectionMode="Single"
+                SelectionChanged="OnSongSelected"
+                ItemsLayout="HorizontalList"
+                IsVisible="{Binding IsSearchActive}">
+                <CollectionView.EmptyView>
+                    <Label Text="No songs match your search."
+               TextColor="#8C76B5"
+               FontSize="12"
+               HorizontalTextAlignment="Center"
+               VerticalTextAlignment="Center" />
+                </CollectionView.EmptyView>
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Border Margin="0,0,6,0"
+                    Padding="8"
+                    Stroke="#4C327C"
+                    StrokeThickness="1"
+                    Background="#1A102A"
+                    StrokeShape="RoundRectangle 8"
+                    WidthRequest="200"
+                    HeightRequest="90">
+                            <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="2">
+                                <Image Grid.RowSpan="4"
+                           Source="{Binding BackgroundImageSource}"
+                           Aspect="AspectFill"
+                           Opacity="0.25"
+                           HorizontalOptions="FillAndExpand"
+                           VerticalOptions="FillAndExpand" />
+                                <BoxView Grid.RowSpan="4"
+                             BackgroundColor="#1A102A"
+                             Opacity="0.2" />
+                                <Label Grid.Row="0"
+                           Text="{Binding Title}"
+                           FontAttributes="Bold"
+                           FontSize="12"
+                           TextColor="#FFF4FF"
+                           LineBreakMode="TailTruncation"
+                           MaxLines="1" />
+                                <Label Grid.Row="1"
+                           Text="{Binding Artist}"
+                           FontSize="10"
+                           TextColor="#D0B7FF"
+                           LineBreakMode="TailTruncation"
+                           MaxLines="1" />
+                                <Label Grid.Row="2"
+                           Text="{Binding ChartSummary}"
+                           FontSize="9"
+                           TextColor="#FFE76A"
+                           VerticalOptions="Center"
+                           HorizontalTextAlignment="Center" />
+                                <Label Grid.Row="3"
+                           Text="▶ SELECT"
+                           FontSize="10"
+                           FontAttributes="Bold"
+                           TextColor="#D94BFF"
+                           HorizontalTextAlignment="Center"
+                           VerticalOptions="End" />
                             </Grid>
                         </Border>
                     </DataTemplate>

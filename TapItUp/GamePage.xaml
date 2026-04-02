@@ -45,14 +45,15 @@
                   VerticalOptions="End"
                   Margin="{OnPlatform Default='0,0,0,10', iOS='0,0,0,5', Android='0,0,0,5'}" />
 
-            <!-- Center Overlay - Judgment and Combo (Above everything else) -->
+            <!-- Center Overlay - Judgment and Combo (Fixed Position with Margin) -->
             <StackLayout x:Name="CenterOverlayPortrait"
                          HorizontalOptions="Center"
                          VerticalOptions="Center"
+                         Margin="0,80,0,0"
                          Spacing="4"
                          IsVisible="True">
                 
-                <!-- Judgment Text -->
+                <!-- Judgment Text (Fixed at top) -->
                 <Label x:Name="CenterJudgmentLabel"
                        Text="READY"
                        FontSize="{OnPlatform Default=40, iOS=32, Android=32}"
@@ -63,19 +64,7 @@
                        Opacity="0.9"
                        Shadow="{Shadow Brush=Black, Offset='2,2', Radius=8, Opacity=0.8}" />
                 
-                <!-- Combo Number (Only visible when combo >= 4) -->
-                <Label x:Name="CenterComboNumberLabel"
-                       Text="4"
-                       FontSize="{OnPlatform Default=42, iOS=36, Android=36}"
-                       FontAttributes="Bold"
-                       TextColor="White"
-                       HorizontalTextAlignment="Center"
-                       VerticalTextAlignment="Center"
-                       IsVisible="False"
-                       Opacity="0.9"
-                       Shadow="{Shadow Brush=Black, Offset='2,2', Radius=8, Opacity=0.8}" />
-                
-                <!-- Combo Text (Only visible when combo >= 4) -->
+                <!-- Combo Text - ABOVE combo number (Only visible when combo >= 4) -->
                 <Label x:Name="CenterComboTextLabel"
                        Text="COMBO"
                        FontSize="{OnPlatform Default=20, iOS=16, Android=16}"
@@ -86,6 +75,18 @@
                        IsVisible="False"
                        Opacity="0.8"
                        Shadow="{Shadow Brush=Black, Offset='1,1', Radius=4, Opacity=0.8}" />
+                
+                <!-- Combo Number - BELOW combo text (Only visible when combo >= 4) -->
+                <Label x:Name="CenterComboNumberLabel"
+                       Text="4"
+                       FontSize="{OnPlatform Default=42, iOS=36, Android=36}"
+                       FontAttributes="Bold"
+                       TextColor="White"
+                       HorizontalTextAlignment="Center"
+                       VerticalTextAlignment="Center"
+                       IsVisible="False"
+                       Opacity="0.9"
+                       Shadow="{Shadow Brush=Black, Offset='2,2', Radius=8, Opacity=0.8}" />
             </StackLayout>
 
             <!-- Stats overlay in portrait - positioned at bottom -->
@@ -158,14 +159,15 @@
                               HorizontalOptions="Center"
                               VerticalOptions="FillAndExpand" />
 
-                <!-- Center Overlay for Landscape - Judgment and Combo -->
+                <!-- Center Overlay for Landscape - Judgment and Combo (Fixed Position with Margin) -->
                 <StackLayout x:Name="CenterOverlayLandscape"
                              HorizontalOptions="Center"
                              VerticalOptions="Center"
+                             Margin="0,60,0,0"
                              Spacing="3"
                              IsVisible="True">
                     
-                    <!-- Judgment Text -->
+                    <!-- Judgment Text (Fixed at top) -->
                     <Label x:Name="LandscapeCenterJudgmentLabel"
                            Text="READY"
                            FontSize="26"
@@ -176,19 +178,7 @@
                            Opacity="0.9"
                            Shadow="{Shadow Brush=Black, Offset='2,2', Radius=8, Opacity=0.8}" />
                     
-                    <!-- Combo Number (Only visible when combo >= 4) -->
-                    <Label x:Name="LandscapeCenterComboNumberLabel"
-                           Text="4"
-                           FontSize="28"
-                           FontAttributes="Bold"
-                           TextColor="White"
-                           HorizontalTextAlignment="Center"
-                           VerticalTextAlignment="Center"
-                           IsVisible="False"
-                           Opacity="0.9"
-                           Shadow="{Shadow Brush=Black, Offset='2,2', Radius=8, Opacity=0.8}" />
-                    
-                    <!-- Combo Text (Only visible when combo >= 4) -->
+                    <!-- Combo Text - ABOVE combo number (Only visible when combo >= 4) -->
                     <Label x:Name="LandscapeCenterComboTextLabel"
                            Text="COMBO"
                            FontSize="14"
@@ -199,6 +189,18 @@
                            IsVisible="False"
                            Opacity="0.8"
                            Shadow="{Shadow Brush=Black, Offset='1,1', Radius=4, Opacity=0.8}" />
+                    
+                    <!-- Combo Number - BELOW combo text (Only visible when combo >= 4) -->
+                    <Label x:Name="LandscapeCenterComboNumberLabel"
+                           Text="4"
+                           FontSize="28"
+                           FontAttributes="Bold"
+                           TextColor="White"
+                           HorizontalTextAlignment="Center"
+                           VerticalTextAlignment="Center"
+                           IsVisible="False"
+                           Opacity="0.9"
+                           Shadow="{Shadow Brush=Black, Offset='2,2', Radius=8, Opacity=0.8}" />
                 </StackLayout>
             </Grid>
 

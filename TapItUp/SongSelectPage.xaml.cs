@@ -69,7 +69,7 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
         }
     }
 
-    public bool IsSongListVisible => !IsSeriesSelectionVisible;
+    public bool IsSongListVisible => !IsSeriesSelectionVisible && !IsSearchActive;
 
     // True only when the series grid should actually be shown:
     // user must be on the series screen AND not actively searching
@@ -86,6 +86,7 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsSearchActive));
             OnPropertyChanged(nameof(IsSeriesViewVisible));
+            OnPropertyChanged(nameof(IsSongListVisible));
             ApplyGlobalSearchFilter();
         }
     }
@@ -499,14 +500,13 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
             else if (bannerImage == null)
             {
                 // Try loading an embedded banner from the app package
-                var embeddedBannerPath = $"banner_{seriesName.Replace(" ", "").ToLower()}.png";
+                var cleanSeriesName = GetCleanSeriesNameForBanner(seriesName);
+                var embeddedBannerPath = $"banner_{cleanSeriesName}.png";
                 try
                 {
-                    var ms = new MemoryStream();
-                    using var s = FileSystem.OpenAppPackageFileAsync(embeddedBannerPath).GetAwaiter().GetResult();
-                    s.CopyTo(ms);
-                    ms.Position = 0;
-                    bannerImage = ImageSource.FromStream(() => ms);
+                    bannerImage = ImageSource.FromStream(() =>
+                        FileSystem.OpenAppPackageFileAsync(embeddedBannerPath)
+                            .GetAwaiter().GetResult());
                 }
                 catch { /* no banner — that's fine */ }
             }
@@ -519,6 +519,24 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
         // Register in the global flat list for cross-series search
         var item = CreateSongListItem(song);
         _allSongsGlobal.Add(item);
+    }
+
+    /// <summary>
+    /// Converts a series name like "16 - PHOENIX" to "phoenix" for embedded banner lookup.
+    /// </summary>
+    private static string GetCleanSeriesNameForBanner(string seriesName)
+    {
+        // Remove number prefix pattern like "16 - " and convert to lowercase
+        var cleaned = seriesName;
+
+        // Look for pattern: digits, space, dash, space at the start
+        var match = System.Text.RegularExpressions.Regex.Match(seriesName, @"^\d+\s*-\s*");
+        if (match.Success)
+        {
+            cleaned = seriesName.Substring(match.Length);
+        }
+
+        return cleaned.Replace(" ", "").ToLower();
     }
 
     private void AddSong(SscSong song)
@@ -582,7 +600,11 @@ public partial class SongSelectPage : ContentPage, INotifyPropertyChanged
 
         if (!IsSearchActive) return;
 
-        foreach (var item in _allSongsGlobal)
+        // When a series is open, filter only that series' songs.
+        // When on the series selector screen, search across all songs.
+        var source = !IsSeriesSelectionVisible ? (IEnumerable<SongListItem>)SongList : _allSongsGlobal;
+
+        foreach (var item in source)
         {
             if (item.Title.Contains(_searchText, StringComparison.OrdinalIgnoreCase)
                 || item.Artist.Contains(_searchText, StringComparison.OrdinalIgnoreCase))
