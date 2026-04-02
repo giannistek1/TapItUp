@@ -42,7 +42,7 @@ public sealed class RhythmGameEngine
 
     private readonly List<PendingChord> _pendingChords = [];
 
-    private const double PreHoldAcceptanceSeconds = 0.01d;
+    private const double PreHoldAcceptanceSeconds = 0.05d;
     private const double TickWindowSeconds = 0.075d;
 
     /// <summary>
@@ -69,9 +69,9 @@ public sealed class RhythmGameEngine
 
     /// <summary>
     /// Controls which timing-window preset is used. Can be changed before or after Load().
-    /// Defaults to Easy.
+    /// Defaults to Standard.
     /// </summary>
-    public JudgmentDifficulty JudgmentDifficulty { get; set; } = JudgmentDifficulty.Easy;
+    public JudgmentDifficulty JudgmentDifficulty { get; set; } = JudgmentDifficulty.Standard;
 
     /// <summary>Total scoreable events: chord groups + hold ticks.</summary>
     public int TotalNoteCount => _chordGroupCount + _holdTicks.Count;
@@ -379,13 +379,11 @@ public sealed class RhythmGameEngine
 
             if (pendingChord.IsComplete)
             {
-                // All lanes pressed — resolve the chord with the worst timing across all notes
                 var worstJudgment = pendingChord.Notes
                     .Select(n => PhoenixScoring.GetJudgment(CurrentTimeSeconds - n.TimeSeconds, this.JudgmentDifficulty))
                     .OrderByDescending(j => (int)j)
                     .First();
 
-                // Consume all notes and activate any holds
                 foreach (var n in pendingChord.Notes)
                 {
                     n.Consumed = true;
@@ -413,6 +411,15 @@ public sealed class RhythmGameEngine
         var judgment = PhoenixScoring.GetJudgment(delta, this.JudgmentDifficulty);
         if (judgment == HitJudgment.Miss) return;
 
+        // Hold-start notes pressed EARLY must not be consumed here.
+        // Activating them immediately causes the hold body to snap from its
+        // current scroll position up to the receptor — visually teleporting.
+        // Instead, keep the button flagged as held (_lanePressed[lane] = true above)
+        // so the Update() pre-press path catches the note naturally as it arrives
+        // at the receptor within PreHoldAcceptanceSeconds.
+        if (candidate.Type == NoteType.HoldStart && delta < 0)
+            return;
+
         // Check for chord siblings
         var chordMembers = _notes
             .Where(n => !n.Consumed &&
@@ -430,7 +437,6 @@ public sealed class RhythmGameEngine
         else
         {
             // Multi-note chord — register the chord and wait for the remaining lanes.
-            // DO NOT consume or activate any notes yet; that happens only on completion.
             var chord = new PendingChord();
             chord.Notes.AddRange(chordMembers);
             chord.PressedLanes.Add(lane);

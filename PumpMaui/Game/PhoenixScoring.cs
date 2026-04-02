@@ -3,7 +3,7 @@
 /// <summary>Selects between the two available timing-window presets.</summary>
 public enum JudgmentDifficulty
 {
-    Easy,
+    Standard,
     Hard
 }
 
@@ -16,7 +16,7 @@ public static class PhoenixScoring
     //   negative  →  player pressed EARLY
     //   positive  →  player pressed LATE
     //
-    // Easy:
+    // Standard:
     //   Early: Perfect ≤ 83.3 ms | Great 83.3–124.9 | Good 124.9–166.5 | Bad 166.5–208.1 | Miss > 208.1
     //   Late:  Perfect ≤ 124.9 ms | Great 124.9–166.5 | Good 166.5–208.1 | Bad 208.1–249.7 | Miss > 249.7
     //
@@ -35,7 +35,7 @@ public static class PhoenixScoring
         double LateGood,
         double LateBad);
 
-    private static readonly TimingWindows EasyWindows = new(
+    private static readonly TimingWindows StandardWindows = new(
         EarlyPerfect: 0.0833d,
         EarlyGreat: 0.1249d,
         EarlyGood: 0.1665d,
@@ -87,7 +87,7 @@ public static class PhoenixScoring
     public static double GetBadWindow(JudgmentDifficulty difficulty)
         => difficulty == JudgmentDifficulty.Hard
             ? HardWindows.LateBad
-            : EasyWindows.LateBad;
+            : StandardWindows.LateBad;
 
     // -------------------------------------------------------------------------
     // Asymmetric judgment evaluation
@@ -96,9 +96,9 @@ public static class PhoenixScoring
     // -------------------------------------------------------------------------
 
     public static HitJudgment GetJudgment(double deltaSeconds,
-        JudgmentDifficulty difficulty = JudgmentDifficulty.Easy)
+        JudgmentDifficulty difficulty = JudgmentDifficulty.Standard)
     {
-        var w = difficulty == JudgmentDifficulty.Hard ? HardWindows : EasyWindows;
+        var w = difficulty == JudgmentDifficulty.Hard ? HardWindows : StandardWindows;
 
         if (deltaSeconds <= 0)
         {

@@ -1055,7 +1055,7 @@ public partial class GamePage : ContentPage
         public double ScrollSpeed { get; set; } = GameConstants.DefaultScrollSpeed;
         public string NoteSkin { get; set; } = "Prime";
         public string? RemoteAudioUrl { get; set; }
-        public JudgmentDifficulty JudgmentDifficulty { get; set; } = JudgmentDifficulty.Easy;
+        public JudgmentDifficulty JudgmentDifficulty { get; set; } = JudgmentDifficulty.Standard;
     }
 
     private sealed class GameResultsData

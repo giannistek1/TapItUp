@@ -430,7 +430,7 @@ public sealed class NoteFieldDrawable : IDrawable
                 // Skip if this hold is completely finished or not relevant
                 if (!isActiveHold && !isUpcomingHold) continue;
                 // Skip holds that have fully passed (use the widest possible bad window for culling)
-                if (endDelta < -PhoenixScoring.GetBadWindow(JudgmentDifficulty.Easy)) continue;
+                if (endDelta < -PhoenixScoring.GetBadWindow(JudgmentDifficulty.Standard)) continue;
 
                 // Calculate actual scroll window based on multiplier (inverted relationship) - extended for landscape
                 var actualScrollWindow = IsLandscapeMode ?
