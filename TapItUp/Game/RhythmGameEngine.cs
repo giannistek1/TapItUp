@@ -381,8 +381,8 @@ public sealed class RhythmGameEngine
 
                     if (member.Type == NoteType.HoldStart)
                         _laneHoldActive[member.Lane] = false;
-                    if (member.HoldPartner != null)
-                        processedThisFrame.Add(member);
+
+                    processedThisFrame.Add(member);
                 }
 
                 // Register only ONE miss for the entire chord
@@ -525,74 +525,6 @@ public sealed class RhythmGameEngine
             _laneLastJudgment[lane] = HitJudgment.Miss;
 
         return _laneLastJudgment[lane];
-    }
-
-    /// <summary>
-    /// Gets the current visual scroll speed multiplier at the current beat/time.
-    /// This is determined by #SPEEDS tags and affects how fast notes move on screen,
-    /// but does NOT affect note timing.
-    /// </summary>
-    public double CurrentScrollSpeedMultiplier
-    {
-        get
-        {
-            if (Song?.SpeedChanges == null || Song.SpeedChanges.Count == 0 || Chart == null)
-                return 1.0d;
-
-            // Convert current time back to beat position
-            var currentBeat = SecondsToNearestBeat(CurrentTimeSeconds);
-
-            // Find the active speed change (most recent one before or at current beat)
-            var activeSpeed = 1.0d;
-            foreach (var change in Song.SpeedChanges.OrderBy(c => c.Beat))
-            {
-                if (change.Beat <= currentBeat)
-                    activeSpeed = change.SpeedMultiplier;
-                else
-                    break;
-            }
-
-            return activeSpeed;
-        }
-    }
-
-    /// <summary>
-    /// Converts a time in seconds back to an approximate beat position.
-    /// Used for calculating current scroll speed from #SPEEDS.
-    /// </summary>
-    private double SecondsToNearestBeat(double seconds)
-    {
-        if (Song?.BpmChanges == null || Song.BpmChanges.Count == 0)
-            return seconds / 60d * 120d; // Assume 120 BPM
-
-        var adjustedSeconds = seconds + Song.OffsetSeconds;
-        var beat = 0d;
-        var time = 0d;
-        var lastBeat = 0d;
-        var currentBpm = Song.BpmChanges[0].Bpm;
-
-        foreach (var change in Song.BpmChanges.OrderBy(c => c.Beat))
-        {
-            var segmentBeats = change.Beat - lastBeat;
-            var segmentTime = segmentBeats / currentBpm * 60d;
-
-            if (time + segmentTime > adjustedSeconds)
-            {
-                // Current time falls within this segment
-                var remainingTime = adjustedSeconds - time;
-                beat = lastBeat + (remainingTime * currentBpm / 60d);
-                return beat;
-            }
-
-            time += segmentTime;
-            lastBeat = change.Beat;
-            currentBpm = change.Bpm;
-        }
-
-        // After last BPM change
-        var finalRemainingTime = adjustedSeconds - time;
-        beat = lastBeat + (finalRemainingTime * currentBpm / 60d);
-        return beat;
     }
 
     // -------------------------------------------------------------------------
