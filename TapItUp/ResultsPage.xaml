@@ -133,7 +133,7 @@
                                    TextColor="#FCE3FF"
                                    HorizontalTextAlignment="Center" />
                             
-                            <Grid ColumnDefinitions="*,*" 
+                            <Grid ColumnDefinitions="2*,*" 
                                   RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto" 
                                   ColumnSpacing="{OnPlatform Default='20', iOS='15', Android='15'}" 
                                   RowSpacing="{OnPlatform Default='5', iOS='4', Android='4'}">
@@ -259,7 +259,7 @@
                                    TextColor="#FCE3FF"
                                    HorizontalTextAlignment="Center" />
                             
-                            <Grid ColumnDefinitions="*,*" 
+                            <Grid ColumnDefinitions="2*,*" 
                                   RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto" 
                                   ColumnSpacing="15" 
                                   RowSpacing="3">

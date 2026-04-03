@@ -306,6 +306,8 @@ public sealed class RhythmGameEngine
                 // Only accept pre-press within the acceptable window
                 if (delta >= -PreHoldAcceptanceSeconds && delta <= badWindow)
                 {
+                    System.Diagnostics.Debug.WriteLine($"🎯 PRE-PRESS CHECK: Lane {note.Lane} at {elapsedSeconds:F3}s, note time: {note.TimeSeconds:F3}s, delta: {delta:F3}s, _lanePressed: {_lanePressed[note.Lane]}");
+
                     // Check if this hold-start is part of a chord
                     var chordMembers = missedNotes
                         .Where(n => !processedThisFrame.Contains(n) &&
@@ -316,6 +318,7 @@ public sealed class RhythmGameEngine
                     if (chordMembers.Count == 1)
                     {
                         // Solo hold-start — activate immediately
+                        System.Diagnostics.Debug.WriteLine($"  ✅ Activating solo hold via pre-press");
                         ActivateHold(note);
                         RegisterJudgment(HitJudgment.Perfect);
                         processedThisFrame.Add(note);
@@ -324,8 +327,10 @@ public sealed class RhythmGameEngine
                     {
                         // Multi-hold chord — only consume if ALL lanes are pressed
                         var allPressed = chordMembers.All(m => _lanePressed[m.Lane]);
+
                         if (allPressed)
                         {
+                            System.Diagnostics.Debug.WriteLine($"  ✅ Activating chord hold via pre-press");
                             foreach (var member in chordMembers)
                             {
                                 ActivateHold(member);
@@ -406,13 +411,19 @@ public sealed class RhythmGameEngine
         }
 
         // --- Hold tick evaluation ---
+        // Check both if button is pressed AND if the hold is actually active
         foreach (var tick in _holdTicks.Where(t => !t.Scored))
         {
             var delta = elapsedSeconds - tick.TimeSeconds;
             if (delta < -TickWindowSeconds) break;
 
             tick.Scored = true;
-            RegisterJudgment(_lanePressed[tick.Lane] ? HitJudgment.Perfect : HitJudgment.Miss);
+            // Only give Perfect if the hold is active AND the button is pressed
+            var isHoldingCorrectly = _laneHoldActive[tick.Lane] && _lanePressed[tick.Lane];
+
+            System.Diagnostics.Debug.WriteLine($"✓ HOLD TICK: Lane {tick.Lane} at {elapsedSeconds:F3}s, Active={_laneHoldActive[tick.Lane]}, Pressed={_lanePressed[tick.Lane]}, Result={(isHoldingCorrectly ? "PERFECT" : "MISS")}");
+
+            RegisterJudgment(isHoldingCorrectly ? HitJudgment.Perfect : HitJudgment.Miss);
         }
 
         // Check if game should end - exclude HoldBody notes as they're visual only
@@ -446,12 +457,17 @@ public sealed class RhythmGameEngine
 
     public void HandleLaneHit(int lane)
     {
+        System.Diagnostics.Debug.WriteLine($"🔵 BUTTON PRESS: Lane {lane} at time {CurrentTimeSeconds:F3}s");
         _laneFlashTimes[lane] = CurrentTimeSeconds;
         _lanePressed[lane] = true;
 
         if (!IsPlaying || Chart is null) return;
 
-        if (_laneHoldActive[lane]) return;
+        if (_laneHoldActive[lane])
+        {
+            System.Diagnostics.Debug.WriteLine($"  ⚠️ Lane {lane} already has an active hold - ignoring press");
+            return;
+        }
 
         // --- Check if this press contributes to a pending chord ---
         var pendingChord = _pendingChords
@@ -503,7 +519,10 @@ public sealed class RhythmGameEngine
         // so the Update() pre-press path catches the note naturally as it arrives
         // at the receptor within PreHoldAcceptanceSeconds.
         if (candidate.Type == NoteType.HoldStart && delta < 0)
+        {
+            System.Diagnostics.Debug.WriteLine($"  📌 Early press on hold note at {candidate.TimeSeconds:F3}s (delta: {delta:F3}s) - waiting for pre-press window");
             return;
+        }
 
         // Check for chord siblings
         var chordMembers = _notes
@@ -516,7 +535,11 @@ public sealed class RhythmGameEngine
         {
             // Solo note — consume and judge immediately
             candidate.Consumed = true;
-            if (candidate.Type == NoteType.HoldStart) ActivateHold(candidate);
+            if (candidate.Type == NoteType.HoldStart)
+            {
+                System.Diagnostics.Debug.WriteLine($"  🎯 Activating hold via HandleLaneHit at {CurrentTimeSeconds:F3}s");
+                ActivateHold(candidate);
+            }
             RegisterJudgment(judgment);
         }
         else
@@ -532,6 +555,7 @@ public sealed class RhythmGameEngine
 
     public void HandleLaneRelease(int lane)
     {
+        System.Diagnostics.Debug.WriteLine($"🔴 BUTTON RELEASE: Lane {lane} at time {CurrentTimeSeconds:F3}s (was pressed: {_lanePressed[lane]}, hold active: {_laneHoldActive[lane]})");
         _lanePressed[lane] = false;
     }
 

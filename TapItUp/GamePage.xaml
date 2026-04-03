@@ -11,7 +11,8 @@
         <!-- Portrait Layout -->
         <Grid x:Name="PortraitLayout" 
               IsVisible="True"
-              Padding="{OnPlatform Default=12, iOS=6, Android=6}">
+              Padding="{OnPlatform Default=12, iOS=6, Android=6}"
+              IsClippedToBounds="True">
 
             <!-- Background -->
             <Image x:Name="BackgroundPreview"
@@ -20,11 +21,12 @@
                    HorizontalOptions="FillAndExpand"
                    VerticalOptions="FillAndExpand" />
 
-            <!-- Fixed width note field centered -->
+            <!-- Fixed width note field centered - extended downward beyond visible area -->
             <GraphicsView x:Name="NoteFieldView"
                           WidthRequest="210" 
                           HorizontalOptions="Center"
-                          VerticalOptions="FillAndExpand" />
+                          VerticalOptions="Start"
+                          HeightRequest="1200" />
 
             <!-- Exit button positioned at top right -->
             <Button Text="✕"
@@ -144,7 +146,8 @@
             <!-- Center - Quarter width note field -->
             <Grid Grid.Column="1" Grid.Row="0" 
                   x:Name="LandscapeCenterGrid"
-                  Margin="8,0">
+                  Margin="8,0"
+                  IsClippedToBounds="True">
 
                 <!-- Background for center area only -->
                 <Image x:Name="LandscapeBackgroundPreview"
@@ -153,11 +156,12 @@
                        HorizontalOptions="FillAndExpand"
                        VerticalOptions="FillAndExpand" />
                 
-                <!-- Note field with quarter width -->
+                <!-- Note field with quarter width - extended downward beyond visible area -->
                 <GraphicsView x:Name="LandscapeNoteFieldView"
-                              WidthRequest="210"
+                              WidthRequest="180"
+                              HeightRequest="900"
                               HorizontalOptions="Center"
-                              VerticalOptions="FillAndExpand" />
+                              VerticalOptions="Start" />
 
                 <!-- Center Overlay for Landscape - Judgment and Combo (Fixed Position with Margin) -->
                 <StackLayout x:Name="CenterOverlayLandscape"

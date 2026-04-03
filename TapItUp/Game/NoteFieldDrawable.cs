@@ -357,7 +357,7 @@ public sealed class NoteFieldDrawable : IDrawable
 
         // Balanced lane widths - smaller for better pattern recognition
         float[] laneWidths = IsLandscapeMode ?
-            new[] { 0.6f, 0.6f, 0.6f, 0.6f, 0.6f } : // Smaller lanes for better pattern visibility
+            new[] { 1f, 1f, 1f, 1f, 1f } : // Smaller lanes for better pattern visibility
             new[] { 1f, 1f, 1f, 1f, 1f };
 
         float total = laneWidths.Sum();

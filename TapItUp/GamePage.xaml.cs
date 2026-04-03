@@ -832,7 +832,7 @@ public partial class GamePage : ContentPage
         if (isLandscapePad)
         {
             // For landscape buttons, create compact square buttons with fixed sizes
-            var buttonSize = DeviceInfo.Platform == DevicePlatform.Android || DeviceInfo.Platform == DevicePlatform.iOS ? 70 : 70;
+            var buttonSize = DeviceInfo.Platform == DevicePlatform.Android || DeviceInfo.Platform == DevicePlatform.iOS ? 74 : 74;
 
             var button = new Button
             {
@@ -840,24 +840,26 @@ public partial class GamePage : ContentPage
                 FontAttributes = FontAttributes.Bold,
                 BackgroundColor = LaneColors[lane].WithAlpha(0.4f),
                 TextColor = Colors.Black,
-                CornerRadius = 8,
+                CornerRadius = 2,
                 Margin = new Thickness(0), // Minimal margin for tight spacing
                 HorizontalOptions = LayoutOptions.Center,
-                VerticalOptions = LayoutOptions.Center,
+                VerticalOptions = LayoutOptions.End,
                 WidthRequest = buttonSize,
-                HeightRequest = buttonSize,
-                Shadow = new Shadow
-                {
-                    Brush = new SolidColorBrush(LaneColors[lane]),
-                    Opacity = 0.3f,
-                    Offset = new Point(0, 2),
-                    Radius = 12
-                }
+                HeightRequest = buttonSize
             };
 
-            // All buttons are functional - players can use either pad to hit any lane
-            button.Pressed += (_, _) => HandleLaneInput(lane);
-            button.Released += (_, _) => _engine.HandleLaneRelease(lane);
+            // FIXED: Use Pressed/Released events with proper null check
+            button.Pressed += (_, _) =>
+            {
+                System.Diagnostics.Debug.WriteLine($"🎮 UI Button Pressed event fired for lane {lane}");
+                HandleLaneInput(lane);
+            };
+
+            button.Released += (_, _) =>
+            {
+                System.Diagnostics.Debug.WriteLine($"🎮 UI Button Released event fired for lane {lane}");
+                _engine.HandleLaneRelease(lane);
+            };
 
             grid.Add(button, column, row);
             return;
@@ -879,24 +881,26 @@ public partial class GamePage : ContentPage
             FontAttributes = FontAttributes.Bold,
             BackgroundColor = LaneColors[lane].WithAlpha(0.4f), // Transparent for portrait
             TextColor = Colors.White,
-            CornerRadius = 8,
+            CornerRadius = 2,
             Margin = new Thickness(0), // Keep original portrait margin
             HorizontalOptions = LayoutOptions.Center,
             VerticalOptions = LayoutOptions.Center,
             WidthRequest = baseSize,
-            HeightRequest = baseSize,
-            Shadow = new Shadow
-            {
-                Brush = new SolidColorBrush(LaneColors[lane]),
-                Opacity = 0.3f,
-                Offset = new Point(0, 2),
-                Radius = 12
-            }
+            HeightRequest = baseSize
         };
 
-        // All buttons are functional - players can use either pad to hit any lane
-        portraitButton.Pressed += (_, _) => HandleLaneInput(lane);
-        portraitButton.Released += (_, _) => _engine.HandleLaneRelease(lane);
+        // FIXED: Use Pressed/Released events with proper null check
+        portraitButton.Pressed += (_, _) =>
+        {
+            System.Diagnostics.Debug.WriteLine($"🎮 UI Button Pressed event fired for lane {lane}");
+            HandleLaneInput(lane);
+        };
+
+        portraitButton.Released += (_, _) =>
+        {
+            System.Diagnostics.Debug.WriteLine($"🎮 UI Button Released event fired for lane {lane}");
+            _engine.HandleLaneRelease(lane);
+        };
 
         grid.Add(portraitButton, column, row);
     }
@@ -1011,6 +1015,10 @@ public partial class GamePage : ContentPage
                 {
                     content.KeyDown -= Content_KeyDown;
                     content.KeyDown += Content_KeyDown;
+
+                    // NEW: Register KeyUp handler
+                    content.KeyUp -= Content_KeyUp;
+                    content.KeyUp += Content_KeyUp;
                 }
             }
         }
@@ -1053,6 +1061,35 @@ public partial class GamePage : ContentPage
         if (lane is int l)
         {
             HandleLaneInput(l);
+            e.Handled = true;
+        }
+    }
+
+    // NEW: Add KeyUp handler for keyboard release events
+    private void Content_KeyUp(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (!_isGameLoaded || !_engine.IsPlaying) return;
+
+        int? lane = e.Key switch
+        {
+            Windows.System.VirtualKey.Number1 or Windows.System.VirtualKey.NumberPad1 => 0, // Bottom left
+            Windows.System.VirtualKey.Number7 or Windows.System.VirtualKey.NumberPad7 => 1, // Top left
+            Windows.System.VirtualKey.Number5 or Windows.System.VirtualKey.NumberPad5 => 2, // Center
+            Windows.System.VirtualKey.Number9 or Windows.System.VirtualKey.NumberPad9 => 3, // Top right
+            Windows.System.VirtualKey.Number3 or Windows.System.VirtualKey.NumberPad3 => 4, // Bottom right
+            // WASD support
+            Windows.System.VirtualKey.A => 1, // Top left
+            Windows.System.VirtualKey.S => 0, // Bottom left
+            Windows.System.VirtualKey.D => 2, // Center
+            Windows.System.VirtualKey.F => 3, // Top right
+            Windows.System.VirtualKey.G => 4, // Bottom right
+            _ => null
+        };
+
+        if (lane is int l)
+        {
+            System.Diagnostics.Debug.WriteLine($"⌨️ Keyboard KeyUp event fired for lane {l}");
+            _engine.HandleLaneRelease(l);
             e.Handled = true;
         }
     }
