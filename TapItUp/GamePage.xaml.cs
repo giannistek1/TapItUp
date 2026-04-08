@@ -32,6 +32,14 @@ public partial class GamePage : ContentPage
     private int _lastAnimatedCombo = -1;
     private string _lastAnimatedJudgment = "";
 
+    /// <summary>
+    /// When false all UI animations (judgment pop, combo punch, screen shake,
+    /// beat pulse) are skipped to keep the frame-rate stable on low-end devices.
+    /// Defaults to false on Android, true everywhere else.
+    /// </summary>
+    public bool AnimationsEnabled { get; set; } =
+        DeviceInfo.Platform != DevicePlatform.Android;
+
     // ── Health meter state ───────────────────────────────────────────────────
     private double _health = 0.30d;
     private double _lastBeatTime = 0d;
@@ -137,6 +145,7 @@ public partial class GamePage : ContentPage
                     _landscapeNoteFieldDrawable.NoteSkin = gameStartData.NoteSkin;
 
                 _engine.JudgmentDifficulty = gameStartData.JudgmentDifficulty;
+                AnimationsEnabled = gameStartData.AnimationsEnabled;
 
                 System.Diagnostics.Debug.WriteLine($"   Song: {_song.Title}");
                 System.Diagnostics.Debug.WriteLine($"   Artist: {_song.Artist}");
@@ -311,7 +320,6 @@ public partial class GamePage : ContentPage
         {
             _lastAnimatedJudgment = judgmentText;
 
-            // MISS always stays red — never let it cycle to yellow
             var judgmentColor = judgmentText switch
             {
                 "PERFECT" => Color.FromArgb("#87CEEB"),
@@ -327,34 +335,45 @@ public partial class GamePage : ContentPage
                 label.Text = judgmentText;
                 label.TextColor = judgmentColor;
                 label.IsVisible = true;
-                _ = AnimateJudgmentAsync(label).ContinueWith(_ =>
+
+                if (AnimationsEnabled)
                 {
-                    // Allow the same judgment to animate again on the next hit
-                    if (_lastAnimatedJudgment == judgmentText)
-                        _lastAnimatedJudgment = "";
-                }, TaskScheduler.FromCurrentSynchronizationContext());
+                    _ = AnimateJudgmentAsync(label).ContinueWith(_ =>
+                    {
+                        if (_lastAnimatedJudgment == judgmentText)
+                            _lastAnimatedJudgment = "";
+                    }, TaskScheduler.FromCurrentSynchronizationContext());
+                }
+                else
+                {
+                    // No animation: auto-hide after a short fixed delay
+                    _ = Task.Delay(500).ContinueWith(_ =>
+                    {
+                        MainThread.BeginInvokeOnMainThread(() =>
+                        {
+                            label.IsVisible = false;
+                            if (_lastAnimatedJudgment == judgmentText)
+                                _lastAnimatedJudgment = "";
+                        });
+                    });
+                }
             }
 
-            // Apply health change for this judgment
             if (Enum.TryParse<HitJudgment>(judgmentText, ignoreCase: true, out var parsedJudgment))
             {
                 ApplyHealthDelta(parsedJudgment);
                 UpdateHealthBar();
 
-                // Screen shake: on miss — subtle nudge only
-                if (parsedJudgment == HitJudgment.Miss)
+                if (AnimationsEnabled && parsedJudgment == HitJudgment.Miss)
                     _ = ShakeScreenAsync(intensity: 3d, durationMs: 160);
             }
         }
         else if (!shouldShowJudgment)
         {
-            // Don't clear _lastAnimatedJudgment here — only clear it when a real
-            // new judgment arrives so that back-to-back identical judgments re-fire.
             CenterJudgmentLabel.IsVisible = false;
             LandscapeCenterJudgmentLabel.IsVisible = false;
         }
 
-        // Miss combo takes priority over good combo when >= 4
         var showMissCombo = _engine.MissCombo >= 4;
         var showGoodCombo = !showMissCombo && _engine.Combo >= 4;
         var showCombo = showMissCombo || showGoodCombo;
@@ -369,7 +388,7 @@ public partial class GamePage : ContentPage
 
         if (showCombo)
         {
-            var isMilestone = comboNumber % 100 == 0 && comboNumber > 0; // 100-combo milestones
+            var isMilestone = comboNumber % 100 == 0 && comboNumber > 0;
             var comboChanged = comboNumber != _lastAnimatedCombo;
             _lastAnimatedCombo = comboNumber;
 
@@ -384,12 +403,11 @@ public partial class GamePage : ContentPage
                 textLabel.Text = "COMBO";
                 textLabel.TextColor = comboColor;
 
-                if (comboChanged)
+                if (comboChanged && AnimationsEnabled)
                     _ = AnimateComboHitAsync(numLabel, textLabel, comboColor, isMilestone);
             }
 
-            // Gentle celebratory nudge on 100-combo milestones
-            if (isMilestone)
+            if (isMilestone && AnimationsEnabled)
                 _ = ShakeScreenAsync(intensity: 2d, durationMs: 140);
         }
         else
@@ -636,18 +654,25 @@ public partial class GamePage : ContentPage
     {
         _beatPulseActive = true;
 
-        // Pulse the outer ContentView containers (wraps the whole bar incl. mask)
-        var containers = new View[] { PortraitHealthContainer, LandscapeHealthContainer };
+        if (AnimationsEnabled)
+        {
+            var containers = new View[] { PortraitHealthContainer, LandscapeHealthContainer };
 
-        foreach (var c in containers)
-            _ = c.ScaleTo(1.05d, 55, Easing.CubicOut);
+            foreach (var c in containers)
+                _ = c.ScaleTo(1.05d, 55, Easing.CubicOut);
 
-        await Task.Delay(55);
+            await Task.Delay(55);
 
-        foreach (var c in containers)
-            _ = c.ScaleTo(1.00d, 90, Easing.SpringOut);
+            foreach (var c in containers)
+                _ = c.ScaleTo(1.00d, 90, Easing.SpringOut);
 
-        await Task.Delay(90);
+            await Task.Delay(90);
+        }
+        else
+        {
+            // Still honour the beat interval so _beatPulseActive releases correctly
+            await Task.Delay(145);
+        }
 
         _beatPulseActive = false;
     }
@@ -1315,8 +1340,6 @@ public partial class GamePage : ContentPage
 
         if (lane is int l)
         {
-            System.Diagnostics.Debug.WriteLine($"⌨️ Keyboard KeyUp event fired for lane {l}");
-            _engine.HandleLaneRelease(l);
             e.Handled = true;
         }
     }
@@ -1343,6 +1366,7 @@ public partial class GamePage : ContentPage
         public string NoteSkin { get; set; } = "Prime";
         public string? RemoteAudioUrl { get; set; }
         public JudgmentDifficulty JudgmentDifficulty { get; set; } = JudgmentDifficulty.Standard;
+        public bool AnimationsEnabled { get; set; } = DeviceInfo.Platform != DevicePlatform.Android;
     }
 
     private sealed class GameResultsData

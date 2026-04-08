@@ -110,10 +110,30 @@ public partial class SongSelectPage : ContentPage
 
     public string AvText => $"AV {_av}";
 
+    private const string AnimationsEnabledKey = "AnimationsEnabled";
+
+    private bool _animationsEnabled;
+    public bool AnimationsEnabled
+    {
+        get => _animationsEnabled;
+        set
+        {
+            if (_animationsEnabled == value) return;
+            _animationsEnabled = value;
+            OnPropertyChanged();
+            Preferences.Default.Set(AnimationsEnabledKey, value);
+        }
+    }
+
     public SongSelectPage()
     {
         InitializeComponent();
         BindingContext = this;
+
+        // Load persisted animation preference; fall back to platform default
+        var platformDefault = DeviceInfo.Platform != DevicePlatform.Android;
+        _animationsEnabled = Preferences.Default.Get(AnimationsEnabledKey, platformDefault);
+
         Routing.RegisterRoute("GamePage", typeof(GamePage));
         SizeChanged += OnPageSizeChanged;
     }
@@ -850,17 +870,18 @@ public partial class SongSelectPage : ContentPage
                 ? new Uri(RemoteSongService.ResolveAssetUrl(_selectedSong, _selectedSong.MusicPath)).AbsoluteUri
                 : null;
 
-            var gameData = new GameStartData
+            var startData = new GameStartData
             {
                 Song = _selectedSong,
                 Chart = _selectedChart,
-                Av = Av,
-                NoteSkin = NoteSkin,
+                Av = _av,
+                NoteSkin = _noteSkin,
                 RemoteAudioUrl = audioUrl,
-                JudgmentDifficulty = _judgmentDifficulty
+                JudgmentDifficulty = _judgmentDifficulty,
+                AnimationsEnabled = _animationsEnabled   // ← new
             };
 
-            var encodedJson = Uri.EscapeDataString(JsonSerializer.Serialize(gameData));
+            var encodedJson = Uri.EscapeDataString(JsonSerializer.Serialize(startData));
             await Shell.Current.GoToAsync("GamePage", new Dictionary<string, object> { { "songData", encodedJson } });
         }
         catch (Exception ex)
@@ -948,4 +969,5 @@ public class GameStartData
     public string NoteSkin { get; set; } = "Prime";
     public string? RemoteAudioUrl { get; set; }
     public JudgmentDifficulty JudgmentDifficulty { get; set; } = JudgmentDifficulty.Standard;
+    public bool AnimationsEnabled { get; set; } = true;
 }
