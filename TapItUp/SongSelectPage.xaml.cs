@@ -333,7 +333,7 @@ public partial class SongSelectPage : ContentPage
 
         var progress = new Progress<LoadProgress>(p => MainThread.BeginInvokeOnMainThread(() =>
         {
-            var text = $"Loading... {p.Percentage:P0}";
+            var text = $"{p.Message} ({p.Current}/{p.Total})";
             LoadingLabelPortrait.Text = text;
             LoadingProgressBarPortrait.Progress = p.Percentage;
             LoadingLabelLandscape.Text = text;
@@ -487,7 +487,7 @@ public partial class SongSelectPage : ContentPage
 
             var progress = new Progress<LoadProgress>(p => MainThread.BeginInvokeOnMainThread(() =>
             {
-                var text = $"Loading... {p.Percentage:P0}";
+                var text = $"{p.Message} ({p.Current}/{p.Total})";
                 LoadingLabelPortrait.Text = text;
                 LoadingProgressBarPortrait.Progress = p.Percentage;
                 LoadingLabelLandscape.Text = text;

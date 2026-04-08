@@ -11,7 +11,7 @@ namespace TapItUp
             builder
                 .UseMauiApp<App>()
                 .UseMauiCommunityToolkit()
-                .UseMauiCommunityToolkitMediaElement(isAndroidForegroundServiceEnabled: false)
+                .UseMauiCommunityToolkitMediaElement()
                 .UseSentry(options =>
                 {
                     // The DSN is the only required setting.
