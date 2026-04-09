@@ -1,7 +1,7 @@
 ﻿using CommunityToolkit.Maui.Views;
-using TapItUp.Game;
 using System.Diagnostics;
 using System.Text.Json;
+using TapItUp.Game;
 
 namespace TapItUp;
 
@@ -31,6 +31,9 @@ public partial class GamePage : ContentPage
     // ── Animation state ──────────────────────────────────────────────────────
     private int _lastAnimatedCombo = -1;
     private string _lastAnimatedJudgment = "";
+
+    // Track which views are currently visible to avoid unnecessary redraws
+    private bool _isPortraitMode = true;
 
     /// <summary>
     /// When false all UI animations (judgment pop, combo punch, screen shake,
@@ -330,33 +333,39 @@ public partial class GamePage : ContentPage
                 _ => Color.FromArgb("#FFE76A")
             };
 
-            foreach (var label in new[] { CenterJudgmentLabel, LandscapeCenterJudgmentLabel })
-            {
-                label.Text = judgmentText;
-                label.TextColor = judgmentColor;
-                label.IsVisible = true;
+            // Animate only the visible label to avoid double-work
+            var visibleLabel = _isPortraitMode ? CenterJudgmentLabel : LandscapeCenterJudgmentLabel;
+            var hiddenLabel = _isPortraitMode ? LandscapeCenterJudgmentLabel : CenterJudgmentLabel;
 
-                if (AnimationsEnabled)
+            visibleLabel.Text = judgmentText;
+            visibleLabel.TextColor = judgmentColor;
+            visibleLabel.IsVisible = true;
+
+            // Update hidden label without animation
+            hiddenLabel.Text = judgmentText;
+            hiddenLabel.TextColor = judgmentColor;
+            hiddenLabel.IsVisible = true;
+
+            if (AnimationsEnabled)
+            {
+                _ = AnimateJudgmentAsync(visibleLabel).ContinueWith(_ =>
                 {
-                    _ = AnimateJudgmentAsync(label).ContinueWith(_ =>
+                    if (_lastAnimatedJudgment == judgmentText)
+                        _lastAnimatedJudgment = "";
+                }, TaskScheduler.FromCurrentSynchronizationContext());
+            }
+            else
+            {
+                // No animation: auto-hide after a short fixed delay
+                _ = Task.Delay(500).ContinueWith(_ =>
+                {
+                    MainThread.BeginInvokeOnMainThread(() =>
                     {
+                        visibleLabel.IsVisible = false;
                         if (_lastAnimatedJudgment == judgmentText)
                             _lastAnimatedJudgment = "";
-                    }, TaskScheduler.FromCurrentSynchronizationContext());
-                }
-                else
-                {
-                    // No animation: auto-hide after a short fixed delay
-                    _ = Task.Delay(500).ContinueWith(_ =>
-                    {
-                        MainThread.BeginInvokeOnMainThread(() =>
-                        {
-                            label.IsVisible = false;
-                            if (_lastAnimatedJudgment == judgmentText)
-                                _lastAnimatedJudgment = "";
-                        });
                     });
-                }
+                });
             }
 
             if (Enum.TryParse<HitJudgment>(judgmentText, ignoreCase: true, out var parsedJudgment))
@@ -392,20 +401,24 @@ public partial class GamePage : ContentPage
             var comboChanged = comboNumber != _lastAnimatedCombo;
             _lastAnimatedCombo = comboNumber;
 
-            foreach (var (numLabel, textLabel) in new[]
-            {
-                (CenterComboNumberLabel,          CenterComboTextLabel),
-                (LandscapeCenterComboNumberLabel, LandscapeCenterComboTextLabel)
-            })
-            {
-                numLabel.Text = comboNumber.ToString();
-                numLabel.TextColor = comboColor;
-                textLabel.Text = "COMBO";
-                textLabel.TextColor = comboColor;
+            // Only animate visible combo labels
+            var (visibleNumLabel, visibleTextLabel, hiddenNumLabel, hiddenTextLabel) = _isPortraitMode
+                ? (CenterComboNumberLabel, CenterComboTextLabel, LandscapeCenterComboNumberLabel, LandscapeCenterComboTextLabel)
+                : (LandscapeCenterComboNumberLabel, LandscapeCenterComboTextLabel, CenterComboNumberLabel, CenterComboTextLabel);
 
-                if (comboChanged && AnimationsEnabled)
-                    _ = AnimateComboHitAsync(numLabel, textLabel, comboColor, isMilestone);
-            }
+            visibleNumLabel.Text = comboNumber.ToString();
+            visibleNumLabel.TextColor = comboColor;
+            visibleTextLabel.Text = "COMBO";
+            visibleTextLabel.TextColor = comboColor;
+
+            // Update hidden labels without animation
+            hiddenNumLabel.Text = comboNumber.ToString();
+            hiddenNumLabel.TextColor = comboColor;
+            hiddenTextLabel.Text = "COMBO";
+            hiddenTextLabel.TextColor = comboColor;
+
+            if (comboChanged && AnimationsEnabled)
+                _ = AnimateComboHitAsync(visibleNumLabel, visibleTextLabel, comboColor, isMilestone);
 
             if (isMilestone && AnimationsEnabled)
                 _ = ShakeScreenAsync(intensity: 2d, durationMs: 140);
@@ -420,6 +433,7 @@ public partial class GamePage : ContentPage
 
     /// <summary>
     /// Judgment pop: slight upward float + bounce scale + fast fade out over ~300 ms.
+    /// Optimized to complete faster and with fewer intermediate steps.
     /// </summary>
     private static async Task AnimateJudgmentAsync(Label label)
     {
@@ -427,23 +441,16 @@ public partial class GamePage : ContentPage
         label.TranslationY = 0d;
         label.Scale = 0.75d;
 
-        // Phase 1 (~60 ms): snap up + scale punch in
+        // Phase 1 & 2 combined (~100 ms): snap up + scale punch + bounce back
         await Task.WhenAll(
-            label.TranslateTo(0d, -8d, 60, Easing.CubicOut),
-            label.ScaleTo(1.10d, 60, Easing.CubicOut));
-
-        // Phase 2 (~40 ms): tiny bounce back down
-        await Task.WhenAll(
-            label.TranslateTo(0d, -4d, 40, Easing.CubicIn),
-            label.ScaleTo(1.00d, 40, Easing.CubicIn));
+            label.TranslateTo(0d, -8d, 100, Easing.CubicOut),
+            label.ScaleTo(1.10d, 100, Easing.CubicOut));
 
         // Phase 3 (~200 ms): float upward while fading out
         await Task.WhenAll(
             label.TranslateTo(0d, -22d, 200, Easing.CubicIn),
             label.FadeTo(0d, 200, Easing.CubicIn));
 
-        // Clear the tracker so the same judgment fires again next hit
-        // (e.g. consecutive MISSes each get their own animation)
         label.IsVisible = false;
         label.Opacity = 1d;
         label.TranslationY = 0d;
@@ -501,30 +508,27 @@ public partial class GamePage : ContentPage
         {
             // Sine wave: oscillates once, decays linearly
             var progress = (double)i / steps;
-            var decay = 1d - progress;                          // 1 → 0
+            var decay = 1d - progress;
             var offset = intensity * decay * Math.Sin(progress * Math.PI * 2d);
             await target.TranslateTo(offset, 0d, stepMs, Easing.Linear);
         }
 
-        // Always snap cleanly back to zero
         target.TranslationX = 0d;
         _isShaking = false;
     }
 
     // ── Health meter ────────────────────────────────────────────────────────
-    // Per-bar references to the dark mask overlay (shrinks right as health rises)
     private BoxView? _portraitHealthMask;
     private BoxView? _landscapeHealthMask;
 
     private void BuildHealthMeters()
     {
-        _portraitHealthBar = null; // not used — replaced by rainbow bar
+        _portraitHealthBar = null;
         _landscapeHealthBar = null;
 
         PortraitHealthContainer.Content = CreateRainbowHealthBar(out _portraitHealthMask);
         LandscapeHealthContainer.Content = CreateRainbowHealthBar(out _landscapeHealthMask);
 
-        // Set initial mask widths to reflect 30 % starting health
         UpdateHealthBar();
     }
 
@@ -534,7 +538,6 @@ public partial class GamePage : ContentPage
     /// </summary>
     private static Grid CreateRainbowHealthBar(out BoxView mask)
     {
-        // Full-width rainbow gradient (red → orange → yellow → green → cyan → blue → violet)
         var rainbow = new BoxView
         {
             HeightRequest = 10,
@@ -558,16 +561,14 @@ public partial class GamePage : ContentPage
             }
         };
 
-        // Dark overlay that covers the right (empty) portion
         mask = new BoxView
         {
             HeightRequest = 10,
             HorizontalOptions = LayoutOptions.End,
             CornerRadius = new CornerRadius(0, 5, 0, 5),
-            BackgroundColor = Color.FromArgb("#CC090212"), // matches page bg
+            BackgroundColor = Color.FromArgb("#CC090212"),
         };
 
-        // Thin dark track behind the gradient
         var track = new BoxView
         {
             HeightRequest = 10,
@@ -607,10 +608,6 @@ public partial class GamePage : ContentPage
 
     private void UpdateHealthBar()
     {
-        // The mask covers the empty (right) portion: WidthRequest proportional to (1 - health).
-        // We use WidthRequest only as a relative hint — the actual pixel width is resolved
-        // via SizeChanged on each container, but a percentage approach via HorizontalOptions
-        // is simpler: we scale the mask's WidthRequest off the container's measured width.
         SetMaskWidth(_portraitHealthMask, PortraitHealthContainer);
         SetMaskWidth(_landscapeHealthMask, LandscapeHealthContainer);
     }
@@ -622,12 +619,10 @@ public partial class GamePage : ContentPage
         var containerWidth = container.Width;
         if (containerWidth <= 0)
         {
-            // Container not yet measured — defer until it has a size
             container.SizeChanged += (_, _) => SetMaskWidth(maskView, container);
             return;
         }
 
-        // Subtract the margin (8 left + 8 right = 16) to match the inner Grid width
         var innerWidth = Math.Max(0, containerWidth - 16);
         var emptyFraction = 1d - _health;
         maskView.WidthRequest = innerWidth * emptyFraction;
@@ -670,7 +665,6 @@ public partial class GamePage : ContentPage
         }
         else
         {
-            // Still honour the beat interval so _beatPulseActive releases correctly
             await Task.Delay(145);
         }
 
@@ -711,10 +705,13 @@ public partial class GamePage : ContentPage
         if (hudChanged)
             RefreshHud();
 
+        // Only invalidate the currently visible view
         if (timeChanged || hudChanged)
         {
-            NoteFieldView.Invalidate();
-            LandscapeNoteFieldView?.Invalidate();
+            if (_isPortraitMode)
+                NoteFieldView.Invalidate();
+            else
+                LandscapeNoteFieldView?.Invalidate();
         }
 
         if (wasPlaying && !_engine.IsPlaying)
@@ -853,7 +850,7 @@ public partial class GamePage : ContentPage
                                 { ".mp3", ".ogg", ".wav", ".flac", ".m4a" };
 
                             Android.Database.ICursor? cursor = null;
-                            string? audioDocId   = null;
+                            string? audioDocId = null;
                             string? audioFileName = null;
                             try
                             {
@@ -868,14 +865,14 @@ public partial class GamePage : ContentPage
                                 while (cursor?.MoveToNext() == true)
                                 {
                                     var docId = cursor.GetString(0);
-                                    var name  = cursor.GetString(1);
+                                    var name = cursor.GetString(1);
                                     if (docId != null && name != null &&
                                         audioExtensions.Contains(Path.GetExtension(name)))
                                     {
                                         if (audioDocId == null ||
                                             name.Equals(Path.GetFileName(_song.MusicPath), StringComparison.OrdinalIgnoreCase))
                                         {
-                                            audioDocId   = docId;
+                                            audioDocId = docId;
                                             audioFileName = name;
                                         }
                                     }
@@ -893,11 +890,11 @@ public partial class GamePage : ContentPage
 
                                 System.Diagnostics.Debug.WriteLine($"🎵 Found SAF audio: {audioFileName} ({audioDocId})");
 
-                                var tempDir  = GetReliableTempDirectory();
+                                var tempDir = GetReliableTempDirectory();
                                 var tempFile = Path.Combine(tempDir,
                                     $"{Path.GetFileNameWithoutExtension(audioFileName!)}_{DateTime.Now.Ticks}{Path.GetExtension(audioFileName)}");
 
-                                await using (var inStream  = context.ContentResolver!.OpenInputStream(audioUri!))
+                                await using (var inStream = context.ContentResolver!.OpenInputStream(audioUri!))
                                 await using (var outStream = File.Create(tempFile))
                                 {
                                     await inStream!.CopyToAsync(outStream);
@@ -1043,6 +1040,7 @@ public partial class GamePage : ContentPage
     private void OnPageSizeChanged(object? sender, EventArgs e)
     {
         var isLandscape = Width > Height;
+        _isPortraitMode = !isLandscape;
 
         PortraitLayout.IsVisible = !isLandscape;
         LandscapeLayout.IsVisible = isLandscape;
@@ -1061,6 +1059,7 @@ public partial class GamePage : ContentPage
                 _landscapeNoteFieldDrawable.IsLandscapeMode = true;
                 _landscapeNoteFieldDrawable.NoteSkin = _noteFieldDrawable.NoteSkin;
                 _landscapeNoteFieldDrawable.ScrollSpeedMultiplier = _noteFieldDrawable.ScrollSpeedMultiplier;
+                _landscapeNoteFieldDrawable.Av = _noteFieldDrawable.Av;
             }
 
             LandscapeCenterGrid.WidthRequest = Width * 0.25;
@@ -1190,8 +1189,11 @@ public partial class GamePage : ContentPage
         if (somethingChanged)
         {
             RefreshHud();
-            NoteFieldView.Invalidate();
-            LandscapeNoteFieldView?.Invalidate();
+            // Only invalidate the currently visible view
+            if (_isPortraitMode)
+                NoteFieldView.Invalidate();
+            else
+                LandscapeNoteFieldView?.Invalidate();
         }
 
         FocusKeyCatcher();
