@@ -32,6 +32,10 @@ public sealed class NoteFieldDrawable : IDrawable
     private static Task? _loadingTask;
     private static bool _imagesLoaded = false;
 
+    // Reusable per-frame note lists — avoids per-frame LINQ allocations
+    private readonly List<PlayableNote> _visibleHolds = new(64);
+    private readonly List<PlayableNote> _visibleNotes = new(128);
+
     // Debug flag for note borders (default: false = no borders)
     public bool ShowNoteBorders { get; set; } = false;
 
@@ -406,7 +410,6 @@ public sealed class NoteFieldDrawable : IDrawable
                 break;
         }
 
-        System.Diagnostics.Debug.WriteLine($"🎵 #SPEEDS active multiplier: {active:F4} at beat {currentBeat:F2}");
         return active;
     }
 
@@ -418,16 +421,15 @@ public sealed class NoteFieldDrawable : IDrawable
     {
         if (seconds <= 0d) return 0d;
 
-        var ordered = bpmChanges.OrderBy(c => c.Beat).ToList();
-        if (ordered.Count == 0) return seconds / 60d * 120d;
-
         var beat = 0d;
-        var currentBpm = ordered[0].Bpm;
+        var currentBpm = bpmChanges[0].Bpm;
         var lastBeat = 0d;
         var elapsed = 0d;
 
-        foreach (var change in ordered)
+        // Iterate without allocating — bpmChanges is already ordered at load time
+        for (var i = 0; i < bpmChanges.Count; i++)
         {
+            var change = bpmChanges[i];
             var beatsInSegment = change.Beat - lastBeat;
             var secondsInSegment = beatsInSegment / currentBpm * 60d;
 
@@ -470,6 +472,8 @@ public sealed class NoteFieldDrawable : IDrawable
     {
         float x = laneGap;
         var travelHeight = fieldBottom - receptorY - 18f;
+        var badWindow = PhoenixScoring.GetBadWindow(JudgmentDifficulty.Standard);
+        var notes = _engine.Notes;
 
         for (var lane = 0; lane < laneCount; lane++)
         {
@@ -477,10 +481,18 @@ public sealed class NoteFieldDrawable : IDrawable
             var centerX = x + width / 2f;
             var laneColorIndex = lane % 5;
 
-            var holdStarts = _engine.Notes.Where(n => n.Lane == lane && n.Type == NoteType.HoldStart).ToList();
-
-            foreach (var holdStart in holdStarts)
+            // Build visible holds without LINQ allocations
+            _visibleHolds.Clear();
+            for (var i = 0; i < notes.Count; i++)
             {
+                var n = notes[i];
+                if (n.Lane == lane && n.Type == NoteType.HoldStart)
+                    _visibleHolds.Add(n);
+            }
+
+            for (var hi = 0; hi < _visibleHolds.Count; hi++)
+            {
+                var holdStart = _visibleHolds[hi];
                 if (holdStart.HoldPartner == null) continue;
 
                 var holdEnd = holdStart.HoldPartner;
@@ -491,7 +503,7 @@ public sealed class NoteFieldDrawable : IDrawable
                 bool isUpcomingHold = !holdStart.Consumed;
 
                 if (!isActiveHold && !isUpcomingHold) continue;
-                if (endDelta < -PhoenixScoring.GetBadWindow(JudgmentDifficulty.Standard)) continue;
+                if (endDelta < -badWindow) continue;
 
                 var startNormalized = (float)(startDelta / scrollWindowSeconds);
                 var endNormalized = (float)(endDelta / scrollWindowSeconds);
@@ -562,6 +574,8 @@ public sealed class NoteFieldDrawable : IDrawable
     {
         float x = laneGap;
         var travelHeight = fieldBottom - receptorY - 18f;
+        var badWindow = PhoenixScoring.GetBadWindow(_engine.JudgmentDifficulty);
+        var notes = _engine.Notes;
 
         for (var lane = 0; lane < laneCount; lane++)
         {
@@ -569,11 +583,21 @@ public sealed class NoteFieldDrawable : IDrawable
             var centerX = x + width / 2f;
             var laneShapeIndex = lane % 5;
 
-            foreach (var note in _engine.Notes.Where(n => n.Lane == lane && !n.Consumed))
+            // Build visible notes without LINQ allocations
+            _visibleNotes.Clear();
+            for (var i = 0; i < notes.Count; i++)
             {
+                var n = notes[i];
+                if (n.Lane == lane && !n.Consumed)
+                    _visibleNotes.Add(n);
+            }
+
+            for (var ni = 0; ni < _visibleNotes.Count; ni++)
+            {
+                var note = _visibleNotes[ni];
                 var deltaSeconds = note.TimeSeconds - _engine.CurrentTimeSeconds;
 
-                if (deltaSeconds < -PhoenixScoring.GetBadWindow(_engine.JudgmentDifficulty) || deltaSeconds > scrollWindowSeconds)
+                if (deltaSeconds < -badWindow || deltaSeconds > scrollWindowSeconds)
                     continue;
 
                 var normalized = (float)(deltaSeconds / scrollWindowSeconds);
@@ -711,16 +735,8 @@ public sealed class NoteFieldDrawable : IDrawable
 
     private void DrawReceptorShape(ICanvas canvas, int lane, float size, float glow, bool isHoldActive)
     {
-        // Receptors should use grayscale assets per user request:
-        // lane 0 (leftmost)  -> gray_prime rotated -90
-        // lane 1            -> gray_prime rotated 0
-        // lane 2 (center)   -> grayc_prime (or skin variant)
-        // lane 3            -> gray_prime rotated 90
-        // lane 4 (rightmost)-> gray_prime rotated 180
-
         if (lane == 2)
         {
-            // center receptor uses grayc_* asset if available
             var grayCenter = GetGrayCenterImage();
             if (grayCenter != null)
             {
@@ -738,7 +754,6 @@ public sealed class NoteFieldDrawable : IDrawable
                 return;
             }
 
-            // Fallback to previous color center image if gray center not available
             var centerImage = GetCenterImage();
             if (centerImage != null)
             {
@@ -755,7 +770,6 @@ public sealed class NoteFieldDrawable : IDrawable
             }
             else
             {
-                // Fallback to drawn square
                 canvas.FillColor = Colors.White.WithAlpha(0.18f + glow * 0.4f);
                 canvas.FillRectangle(-size / 2f, -size / 2f, size, size);
                 if (ShowNoteBorders)
@@ -768,7 +782,6 @@ public sealed class NoteFieldDrawable : IDrawable
         }
         else
         {
-            // Non-center receptors: use gray image rotated per lane mapping
             DrawGrayReceptor(canvas, lane, size, glow, isHoldActive);
         }
     }
@@ -777,11 +790,6 @@ public sealed class NoteFieldDrawable : IDrawable
     {
         var gray = GetGrayImage();
 
-        // rotation mapping:
-        // lane 0 -> -90
-        // lane 1 -> 0
-        // lane 3 -> 90
-        // lane 4 -> 180
         float rotation = lane switch
         {
             0 => -90f,
@@ -796,11 +804,8 @@ public sealed class NoteFieldDrawable : IDrawable
             canvas.SaveState();
 
             if (rotation != 0f)
-            {
                 canvas.Rotate(rotation);
-            }
 
-            // Use normal (full) alpha for non-center grayscale receptors per request
             canvas.Alpha = 1f;
             canvas.DrawImage(gray, -size / 2f, -size / 2f, size, size);
             canvas.Alpha = 1f;
@@ -816,7 +821,6 @@ public sealed class NoteFieldDrawable : IDrawable
             return;
         }
 
-        // If no gray image found, fallback to colored receptor rendering
         IImage? image = null;
         float fallbackRotation = 0f;
 
@@ -858,7 +862,6 @@ public sealed class NoteFieldDrawable : IDrawable
         }
         else
         {
-            // final fallback: drawn diagonal arrow (colored)
             canvas.FillColor = LaneColors[lane].WithAlpha(0.20f + glow * 0.40f);
 
             if (ShowNoteBorders)
@@ -1015,10 +1018,7 @@ public sealed class NoteFieldDrawable : IDrawable
         else
         {
             canvas.FillPath(path);
-            if (!strokeOnly)
-            {
-                canvas.DrawPath(path);
-            }
+            canvas.DrawPath(path);
         }
     }
 
@@ -1032,15 +1032,6 @@ public sealed class NoteFieldDrawable : IDrawable
         canvas.FontSize = 14f;
     }
 
-    /// <summary>
-    /// Draws a multi-part arcade receptor flash effect centred at the current canvas origin.
-    /// Decomposed into five phases:
-    ///   1. Base flash  – receptor brightens to white instantly then fades (~100 ms)
-    ///   2. Radial glow – soft white-blue circle expands outward and fades (~250 ms)
-    ///   3. Shine sweep – diagonal streak passes top-left → bottom-right (~120 ms)
-    ///   4. Sparkles    – 8 small particles burst outward and fade (~300 ms)
-    ///   5. Scale punch – receptor scales 1 → 1.1 → 1 over ~120 ms (drawn by caller)
-    /// </summary>
     private static void DrawStarBurst(ICanvas canvas, int lane, float receptorSize, double flashAge, HitJudgment judgment)
     {
         const double TotalDuration = 0.30d;

@@ -295,7 +295,6 @@ public sealed class RhythmGameEngine
             var chord = _pendingChords[ci];
             if (!chord.IsExpired(elapsedSeconds, badWindow)) continue;
 
-            // Mark every note (pressed or not) as consumed+missed and end any active holds
             foreach (var n in chord.Notes)
             {
                 if (!n.Consumed)
@@ -312,61 +311,79 @@ public sealed class RhythmGameEngine
         }
 
         // --- Regular note processing (with chord grouping for auto-miss) ---
-        var pendingNotes = _pendingChords.SelectMany(c => c.Notes).ToHashSet();
+        // Build pending set without SelectMany/ToHashSet allocation
+        // by checking inline during the loop below.
 
-        // Group notes that should be treated as chords for auto-miss
-        var missedNotes = _notes
-            .Where(n => !n.Consumed && !n.Missed && !pendingNotes.Contains(n))
-            .ToList();
-
-        var processedThisFrame = new HashSet<PlayableNote>();
-
-        foreach (var note in missedNotes)
+        for (var ni = 0; ni < _notes.Count; ni++)
         {
-            if (processedThisFrame.Contains(note)) continue;
+            var note = _notes[ni];
+            if (note.Consumed || note.Missed) continue;
+
+            // Skip notes already tracked in a pending chord
+            var inPendingChord = false;
+            for (var ci = 0; ci < _pendingChords.Count; ci++)
+            {
+                var chord = _pendingChords[ci];
+                for (var cni = 0; cni < chord.Notes.Count; cni++)
+                {
+                    if (chord.Notes[cni] == note) { inPendingChord = true; break; }
+                }
+                if (inPendingChord) break;
+            }
+            if (inPendingChord) continue;
 
             var delta = elapsedSeconds - note.TimeSeconds;
 
             // Pre-press: button already held when a hold head arrives
             if (note.Type == NoteType.HoldStart && !_laneHoldActive[note.Lane] && _lanePressed[note.Lane])
             {
-                // Only accept pre-press within the acceptable window
                 if (delta >= -PreHoldAcceptanceSeconds && delta <= badWindow)
                 {
-                    System.Diagnostics.Debug.WriteLine($"🎯 PRE-PRESS CHECK: Lane {note.Lane} at {elapsedSeconds:F3}s, note time: {note.TimeSeconds:F3}s, delta: {delta:F3}s, _lanePressed: {_lanePressed[note.Lane]}");
-
-                    // Check if this hold-start is part of a chord
-                    var chordMembers = missedNotes
-                        .Where(n => !processedThisFrame.Contains(n) &&
-                                    n.Type == NoteType.HoldStart &&
-                                    Math.Abs(n.TimeSeconds - note.TimeSeconds) <= ChordWindowSeconds)
-                        .ToList();
-
-                    if (chordMembers.Count == 1)
+                    // Check for chord siblings (hold-starts near the same time)
+                    var chordCount = 0;
+                    for (var si = 0; si < _notes.Count; si++)
                     {
-                        // Solo hold-start — activate immediately
-                        System.Diagnostics.Debug.WriteLine($"  ✅ Activating solo hold via pre-press");
+                        var sn = _notes[si];
+                        if (!sn.Consumed && !sn.Missed &&
+                            sn.Type == NoteType.HoldStart &&
+                            Math.Abs(sn.TimeSeconds - note.TimeSeconds) <= ChordWindowSeconds)
+                            chordCount++;
+                    }
+
+                    if (chordCount == 1)
+                    {
                         ActivateHold(note);
                         RegisterJudgment(HitJudgment.Perfect);
-                        processedThisFrame.Add(note);
                     }
                     else
                     {
-                        // Multi-hold chord — only consume if ALL lanes are pressed
-                        var allPressed = chordMembers.All(m => _lanePressed[m.Lane]);
+                        // Only activate if all chord lanes are pressed
+                        var allPressed = true;
+                        for (var si = 0; si < _notes.Count; si++)
+                        {
+                            var sn = _notes[si];
+                            if (!sn.Consumed && !sn.Missed &&
+                                sn.Type == NoteType.HoldStart &&
+                                Math.Abs(sn.TimeSeconds - note.TimeSeconds) <= ChordWindowSeconds &&
+                                !_lanePressed[sn.Lane])
+                            {
+                                allPressed = false;
+                                break;
+                            }
+                        }
 
                         if (allPressed)
                         {
-                            System.Diagnostics.Debug.WriteLine($"  ✅ Activating chord hold via pre-press");
-                            foreach (var member in chordMembers)
+                            for (var si = 0; si < _notes.Count; si++)
                             {
-                                ActivateHold(member);
-                                processedThisFrame.Add(member);
+                                var sn = _notes[si];
+                                if (!sn.Consumed && !sn.Missed &&
+                                    sn.Type == NoteType.HoldStart &&
+                                    Math.Abs(sn.TimeSeconds - note.TimeSeconds) <= ChordWindowSeconds)
+                                    ActivateHold(sn);
                             }
                             RegisterJudgment(HitJudgment.Perfect);
                         }
-                        // If not all pressed, let them continue scrolling; they'll form a PendingChord
-                        // when the first lane is hit, or auto-miss if all are ignored
                     }
 
                     continue;
@@ -378,102 +395,103 @@ public sealed class RhythmGameEngine
             {
                 if (_laneHoldActive[note.Lane])
                 {
-                    // Hold is active - check if we've reached the judgment point
                     if (delta >= 0)
                     {
-                        // At or past the hold-end note - judge based on whether button is still pressed
                         note.Consumed = true;
                         _laneHoldActive[note.Lane] = false;
                         if (note.HoldPartner != null) note.HoldPartner.IsHoldActive = false;
 
-                        // Hold notes are binary: Perfect if held, Miss if not
                         var judgment = _lanePressed[note.Lane] ? HitJudgment.Perfect : HitJudgment.Miss;
-
                         RegisterJudgment(judgment);
-                        processedThisFrame.Add(note);
                     }
                 }
                 else
                 {
-                    // Hold is not active
                     if (delta > badWindow)
                     {
-                        // Hold was never activated (player missed the hold start) - auto-consume the tail
                         note.Consumed = true;
                         note.Missed = true;
-                        processedThisFrame.Add(note);
-                        // Don't register a judgment - the miss was already counted on the hold start
                     }
                 }
 
-                continue; // Skip chord grouping for hold-end notes
+                continue;
             }
 
-            // Auto-miss: tap/hold-start note has passed the bad window (LATE timing window)
-            // Only process notes that are truly past their timing window
+            // Auto-miss: tap/hold-start note has passed the bad window
             if (delta > badWindow && (note.Type == NoteType.Tap || note.Type == NoteType.HoldStart))
             {
-                // Find all simultaneous notes (chord) that also need to be missed
-                var chordMembers = missedNotes
-                    .Where(n => !processedThisFrame.Contains(n) &&
-                                (n.Type == NoteType.Tap || n.Type == NoteType.HoldStart) &&
-                                Math.Abs(n.TimeSeconds - note.TimeSeconds) <= ChordWindowSeconds)
-                    .ToList();
-
-                // Mark all chord members as consumed and missed
-                foreach (var member in chordMembers)
+                // Count chord members first to register only one miss per chord
+                var firstInChord = true;
+                for (var si = 0; si < ni; si++)
                 {
-                    member.Consumed = true;
-                    member.Missed = true;
-
-                    if (member.Type == NoteType.HoldStart)
-                        _laneHoldActive[member.Lane] = false;
-
-                    processedThisFrame.Add(member);
+                    var sn = _notes[si];
+                    if ((sn.Consumed || sn.Missed) &&
+                        (sn.Type == NoteType.Tap || sn.Type == NoteType.HoldStart) &&
+                        Math.Abs(sn.TimeSeconds - note.TimeSeconds) <= ChordWindowSeconds)
+                    {
+                        firstInChord = false;
+                        break;
+                    }
                 }
 
-                // Register only ONE miss for the entire chord
-                RegisterJudgment(HitJudgment.Miss);
+                note.Consumed = true;
+                note.Missed = true;
+
+                if (note.Type == NoteType.HoldStart)
+                    _laneHoldActive[note.Lane] = false;
+
+                // Mark all chord siblings in the same pass
+                for (var si = ni + 1; si < _notes.Count; si++)
+                {
+                    var sn = _notes[si];
+                    if (!sn.Consumed && !sn.Missed &&
+                        (sn.Type == NoteType.Tap || sn.Type == NoteType.HoldStart) &&
+                        Math.Abs(sn.TimeSeconds - note.TimeSeconds) <= ChordWindowSeconds)
+                    {
+                        sn.Consumed = true;
+                        sn.Missed = true;
+                        if (sn.Type == NoteType.HoldStart)
+                            _laneHoldActive[sn.Lane] = false;
+                    }
+                }
+
+                if (firstInChord)
+                    RegisterJudgment(HitJudgment.Miss);
             }
         }
 
         // --- Hold tick evaluation ---
-        // Check both if button is pressed AND if the hold is actually active
-        foreach (var tick in _holdTicks.Where(t => !t.Scored))
+        for (var ti = 0; ti < _holdTicks.Count; ti++)
         {
+            var tick = _holdTicks[ti];
+            if (tick.Scored) continue;
+
             var delta = elapsedSeconds - tick.TimeSeconds;
             if (delta < -TickWindowSeconds) break;
 
             tick.Scored = true;
-            // Only give Perfect if the hold is active AND the button is pressed
             var isHoldingCorrectly = _laneHoldActive[tick.Lane] && _lanePressed[tick.Lane];
-
-            System.Diagnostics.Debug.WriteLine($"✓ HOLD TICK: Lane {tick.Lane} at {elapsedSeconds:F3}s, Active={_laneHoldActive[tick.Lane]}, Pressed={_lanePressed[tick.Lane]}, Result={(isHoldingCorrectly ? "PERFECT" : "MISS")}");
-
             RegisterJudgment(isHoldingCorrectly ? HitJudgment.Perfect : HitJudgment.Miss);
         }
 
-        // Check if game should end - exclude HoldBody notes as they're visual only
-        var scoreableNotes = _notes.Where(n => n.Type != NoteType.HoldBody).ToList();
-
-        if (elapsedSeconds >= SongDurationSeconds && scoreableNotes.All(note => note.Consumed))
+        // Check if game should end — avoid LINQ on every frame
+        if (elapsedSeconds >= SongDurationSeconds)
         {
-            System.Diagnostics.Debug.WriteLine($"🎮 Song ending - elapsedSeconds: {elapsedSeconds:F2}, SongDurationSeconds: {SongDurationSeconds:F2}");
-            System.Diagnostics.Debug.WriteLine($"   All scoreable notes consumed: {scoreableNotes.Count(n => n.Consumed)}/{scoreableNotes.Count}");
-            IsPlaying = false;
-            LastJudgmentText = $"FINAL {Grade}";
-        }
-        else if (elapsedSeconds >= SongDurationSeconds)
-        {
-            // Debug: show which notes aren't consumed yet
-            var unconsumed = scoreableNotes.Where(n => !n.Consumed).ToList();
-            if (unconsumed.Count > 0 && unconsumed.Count <= 10)
+            var allConsumed = true;
+            for (var ni = 0; ni < _notes.Count; ni++)
             {
-                System.Diagnostics.Debug.WriteLine($"⚠️ Song time reached but {unconsumed.Count} scoreable notes not consumed:");
-                foreach (var n in unconsumed)
+                var n = _notes[ni];
+                if (n.Type != NoteType.HoldBody && !n.Consumed)
                 {
-                    System.Diagnostics.Debug.WriteLine($"   Lane {n.Lane}, Type {n.Type}, Time {n.TimeSeconds:F2}s, Missed: {n.Missed}");
+                    allConsumed = false;
+                    break;
                 }
+            }
+
+            if (allConsumed)
+            {
+                IsPlaying = false;
+                LastJudgmentText = $"FINAL {Grade}";
             }
         }
 
@@ -482,23 +500,15 @@ public sealed class RhythmGameEngine
             Song.BpmChanges);
     }
 
-    // -------------------------------------------------------------------------
-    // Input handlers
-    // -------------------------------------------------------------------------
-
     public void HandleLaneHit(int lane)
     {
-        System.Diagnostics.Debug.WriteLine($"🔵 BUTTON PRESS: Lane {lane} at time {CurrentTimeSeconds:F3}s");
         _laneFlashTimes[lane] = CurrentTimeSeconds;
         _lanePressed[lane] = true;
 
         if (!IsPlaying || Chart is null) return;
 
         if (_laneHoldActive[lane])
-        {
-            System.Diagnostics.Debug.WriteLine($"  ⚠️ Lane {lane} already has an active hold - ignoring press");
             return;
-        }
 
         // --- Check if this press contributes to a pending chord ---
         var pendingChord = _pendingChords
@@ -543,17 +553,8 @@ public sealed class RhythmGameEngine
         var judgment = PhoenixScoring.GetJudgment(delta, this.JudgmentDifficulty);
         if (judgment == HitJudgment.Miss) return;
 
-        // Hold-start notes pressed EARLY must not be consumed here.
-        // Activating them immediately causes the hold body to snap from its
-        // current scroll position up to the receptor — visually teleporting.
-        // Instead, keep the button flagged as held (_lanePressed[lane] = true above)
-        // so the Update() pre-press path catches the note naturally as it arrives
-        // at the receptor within PreHoldAcceptanceSeconds.
         if (candidate.Type == NoteType.HoldStart && delta < 0)
-        {
-            System.Diagnostics.Debug.WriteLine($"  📌 Early press on hold note at {candidate.TimeSeconds:F3}s (delta: {delta:F3}s) - waiting for pre-press window");
             return;
-        }
 
         // Check for chord siblings
         var chordMembers = _notes
@@ -564,18 +565,13 @@ public sealed class RhythmGameEngine
 
         if (chordMembers.Count == 1)
         {
-            // Solo note — consume and judge immediately
             candidate.Consumed = true;
             if (candidate.Type == NoteType.HoldStart)
-            {
-                System.Diagnostics.Debug.WriteLine($"  🎯 Activating hold via HandleLaneHit at {CurrentTimeSeconds:F3}s");
                 ActivateHold(candidate);
-            }
             RegisterJudgment(judgment);
         }
         else
         {
-            // Multi-note chord — register the chord and wait for the remaining lanes.
             var chord = new PendingChord();
             chord.Notes.AddRange(chordMembers);
             chord.PressedLanes.Add(lane);
@@ -586,7 +582,6 @@ public sealed class RhythmGameEngine
 
     public void HandleLaneRelease(int lane)
     {
-        System.Diagnostics.Debug.WriteLine($"🔴 BUTTON RELEASE: Lane {lane} at time {CurrentTimeSeconds:F3}s (was pressed: {_lanePressed[lane]}, hold active: {_laneHoldActive[lane]})");
         _lanePressed[lane] = false;
     }
 
@@ -597,6 +592,7 @@ public sealed class RhythmGameEngine
 
     /// <summary>
     /// Returns the most recent <see cref="HitJudgment"/> registered on <paramref name="lane"/>,
+
     /// or <see cref="HitJudgment.Miss"/> if the flash window (250 ms) has already expired.
     /// </summary>
     public HitJudgment GetLaneLastJudgment(int lane)
@@ -628,10 +624,14 @@ public sealed class RhythmGameEngine
     // Scoring
     // -------------------------------------------------------------------------
 
+    // Running weighted sum for incremental score calculation — avoids per-hit dictionary enumeration
+    private double _weightedSum;
+
     private void RegisterJudgment(HitJudgment judgment)
     {
         _counts[judgment]++;
         JudgmentSequence++;
+        _weightedSum += PhoenixScoring.GetWeight(judgment);
 
         if (judgment == HitJudgment.Miss)
         {
@@ -660,10 +660,10 @@ public sealed class RhythmGameEngine
                 _laneLastJudgment[i] = judgment;
         }
 
-        Score = PhoenixScoring.CalculateScore(_counts, TotalNoteCount, MaxCombo);
+        Score = PhoenixScoring.CalculateScoreIncremental(_weightedSum, TotalNoteCount, MaxCombo);
         Grade = PhoenixScoring.CalculateGrade(Score);
         Plate = PhoenixScoring.CalculatePlate(_counts, TotalNoteCount);
-        LastJudgmentText = judgment.ToString().ToUpperInvariant();
+        LastJudgmentText = PhoenixScoring.GetJudgmentText(judgment);
     }
 
     // -------------------------------------------------------------------------
@@ -674,6 +674,8 @@ public sealed class RhythmGameEngine
     {
         foreach (var judgment in _counts.Keys.ToList())
             _counts[judgment] = 0;
+
+        _weightedSum = 0d;
 
         foreach (var note in _notes)
         {

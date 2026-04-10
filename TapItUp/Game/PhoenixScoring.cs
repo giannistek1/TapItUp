@@ -65,6 +65,23 @@ public static class PhoenixScoring
     public const int AccuracyMaxScore = 995_000;
     public const int ComboMaxScore = 5_000;
 
+    // Pre-allocated judgment text strings — avoids enum.ToString() + ToUpperInvariant() allocation on every hit
+    private static readonly string[] JudgmentTexts =
+        ["PERFECT", "GREAT", "GOOD", "BAD", "MISS"];
+
+    /// <summary>
+    /// Returns the pre-allocated display string for a judgment.
+    /// Zero allocations — safe to call from the game loop every frame.
+    /// </summary>
+    public static string GetJudgmentText(HitJudgment judgment) => judgment switch
+    {
+        HitJudgment.Perfect => JudgmentTexts[0],
+        HitJudgment.Great => JudgmentTexts[1],
+        HitJudgment.Good => JudgmentTexts[2],
+        HitJudgment.Bad => JudgmentTexts[3],
+        _ => JudgmentTexts[4]
+    };
+
     // -------------------------------------------------------------------------
     // Judgment weights (accuracy pool)
     //   Perfect = 100 %, Great = 60 %, Good = 20 %, Bad = 10 %, Miss = 0 %
@@ -123,9 +140,30 @@ public static class PhoenixScoring
         => judgment is HitJudgment.Bad or HitJudgment.Miss;
 
     // -------------------------------------------------------------------------
-    // Score calculation
+    // Score calculation — incremental overload avoids re-summing the dictionary
     // -------------------------------------------------------------------------
 
+    /// <summary>
+    /// Incremental score update: adds the weight delta for one new judgment.
+    /// Call this instead of the full <see cref="CalculateScore"/> overload during gameplay
+    /// to avoid a per-hit dictionary enumeration allocation.
+    /// </summary>
+    public static int CalculateScoreIncremental(
+        double currentWeightedSum,
+        int noteCount,
+        int maxCombo)
+    {
+        if (noteCount <= 0) return 0;
+
+        var accuracyScore = currentWeightedSum / noteCount * AccuracyMaxScore;
+        var comboScore = maxCombo >= noteCount ? ComboMaxScore : 0;
+
+        return Math.Min(MaxScore, (int)Math.Round(accuracyScore + comboScore, MidpointRounding.AwayFromZero));
+    }
+
+    /// <summary>
+    /// Full recalculation from counts — use only at load/reset, not during the game loop.
+    /// </summary>
     public static int CalculateScore(
         IReadOnlyDictionary<HitJudgment, int> counts,
         int noteCount,
@@ -133,11 +171,14 @@ public static class PhoenixScoring
     {
         if (noteCount <= 0) return 0;
 
-        var weightedSum = counts.Sum(pair => pair.Value * GetWeight(pair.Key));
-        var accuracyScore = weightedSum / noteCount * AccuracyMaxScore;
-        var comboScore = maxCombo >= noteCount ? ComboMaxScore : 0;
+        var weightedSum = 0d;
+        weightedSum += counts[HitJudgment.Perfect] * 1.00d;
+        weightedSum += counts[HitJudgment.Great] * 0.60d;
+        weightedSum += counts[HitJudgment.Good] * 0.20d;
+        weightedSum += counts[HitJudgment.Bad] * 0.10d;
+        // Miss contributes 0 — omitted
 
-        return Math.Min(MaxScore, (int)Math.Round(accuracyScore + comboScore, MidpointRounding.AwayFromZero));
+        return CalculateScoreIncremental(weightedSum, noteCount, maxCombo);
     }
 
     // -------------------------------------------------------------------------
