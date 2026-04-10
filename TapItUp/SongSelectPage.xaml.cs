@@ -856,14 +856,20 @@ public partial class SongSelectPage : ContentPage
     // Play
     // -------------------------------------------------------------------------
 
+    // ── Navigation guard ─────────────────────────────────────────────────────
+    private bool _isNavigating;
+
     private async void OnPlayClicked(object sender, EventArgs e)
     {
+        if (_isNavigating) return;
+
         if (_selectedSong == null || _selectedChart == null)
         {
             await DisplayAlert("No Selection", "Please select a song and chart first.", "OK");
             return;
         }
 
+        _isNavigating = true;
         try
         {
             var audioUrl = !string.IsNullOrWhiteSpace(_selectedSong.BaseUrl)
@@ -878,7 +884,7 @@ public partial class SongSelectPage : ContentPage
                 NoteSkin = _noteSkin,
                 RemoteAudioUrl = audioUrl,
                 JudgmentDifficulty = _judgmentDifficulty,
-                AnimationsEnabled = _animationsEnabled   // ← new
+                AnimationsEnabled = _animationsEnabled
             };
 
             var encodedJson = Uri.EscapeDataString(JsonSerializer.Serialize(startData));
@@ -888,6 +894,28 @@ public partial class SongSelectPage : ContentPage
         {
             await DisplayAlert("Error", $"Failed to start game: {ex.Message}", "OK");
         }
+        finally
+        {
+            // Reset after navigation so the button works again when returning to this page
+            _isNavigating = false;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Back button — return to series selection instead of closing the app
+    // -------------------------------------------------------------------------
+
+    protected override bool OnBackButtonPressed()
+    {
+        // If a song list is open (series was selected), go back to series selection
+        if (!IsSeriesSelectionVisible)
+        {
+            OnBackToSeriesClicked(this, EventArgs.Empty);
+            return true; // consumed — do not close the app
+        }
+
+        // Already on the series screen; let the default behaviour close/navigate normally
+        return base.OnBackButtonPressed();
     }
 
     // -------------------------------------------------------------------------
