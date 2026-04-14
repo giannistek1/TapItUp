@@ -779,7 +779,6 @@ public partial class SongSelectPage : ContentPage
         ChartPicker.Items.Clear();
         LandscapeChartPicker.Items.Clear();
         _currentSortedCharts.Clear();
-        SelectedChartBorder.IsVisible = false;
 
         SelectedTitleLabel.Text = "";
         SelectedArtistLabel.Text = "";
@@ -796,7 +795,6 @@ public partial class SongSelectPage : ContentPage
         ChartPicker.Items.Clear();
         LandscapeChartPicker?.Items.Clear();
         _currentSortedCharts.Clear();
-        SelectedChartBorder.IsVisible = false;
 
         if (song?.Charts == null || song.Charts.Count == 0) return;
 
@@ -819,7 +817,6 @@ public partial class SongSelectPage : ContentPage
                 LandscapeChartPicker.SelectedIndex = 0;
 
             _selectedChart = _currentSortedCharts.First();
-            UpdateSelectedChartDisplay();
         }
     }
 
@@ -830,7 +827,6 @@ public partial class SongSelectPage : ContentPage
 
         if (_selectedSong == null || selectedIndex < 0 || selectedIndex >= _currentSortedCharts.Count)
         {
-            SelectedChartBorder.IsVisible = false;
             return;
         }
 
@@ -840,16 +836,6 @@ public partial class SongSelectPage : ContentPage
             ChartPicker.SelectedIndex = selectedIndex;
 
         _selectedChart = _currentSortedCharts[selectedIndex];
-        UpdateSelectedChartDisplay();
-    }
-
-    private void UpdateSelectedChartDisplay()
-    {
-        if (_selectedChart == null) { SelectedChartBorder.IsVisible = false; return; }
-
-        SelectedChartLevelLabel.Text = GetChartDisplayText(_selectedChart);
-        SelectedChartNotesLabel.Text = $"{_selectedChart.Notes.Count} notes";
-        SelectedChartBorder.IsVisible = true;
     }
 
     // -------------------------------------------------------------------------
