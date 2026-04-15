@@ -35,6 +35,7 @@ public sealed class NoteFieldDrawable : IDrawable
     // Reusable per-frame note lists — avoids per-frame LINQ allocations
     private readonly List<PlayableNote> _visibleHolds = new(64);
     private readonly List<PlayableNote> _visibleNotes = new(128);
+    private readonly float[] _laneWidths = new float[10]; // reused every Draw call
 
     // Debug flag for note borders (default: false = no borders)
     public bool ShowNoteBorders { get; set; } = false;
@@ -368,18 +369,18 @@ public sealed class NoteFieldDrawable : IDrawable
         var laneGap = 0f;
 
         float unit = dirtyRect.Width / laneCount;
-        float[] actualWidths = Enumerable.Repeat(unit, laneCount).ToArray();
+        for (var i = 0; i < laneCount; i++)
+            _laneWidths[i] = unit;
 
         var fieldBottom = dirtyRect.Height - bottomMargin;
 
-        // Scroll window in seconds: 720 / AV, scaled by any in-song #SPEEDS modifier.
         var songSpeedMultiplier = GetActiveSongSpeedMultiplier();
         var scrollWindowSeconds = 720.0 / Av / songSpeedMultiplier;
 
-        DrawLaneBackgrounds(canvas, dirtyRect, actualWidths, laneGap, receptorY, fieldBottom, laneCount);
-        DrawHoldBodies(canvas, actualWidths, laneGap, receptorY, fieldBottom, laneCount, scrollWindowSeconds);
-        DrawReceptors(canvas, actualWidths, laneGap, receptorY, laneCount);
-        DrawNotes(canvas, actualWidths, laneGap, receptorY, fieldBottom, laneCount, scrollWindowSeconds);
+        DrawLaneBackgrounds(canvas, dirtyRect, _laneWidths, laneGap, receptorY, fieldBottom, laneCount);
+        DrawHoldBodies(canvas, _laneWidths, laneGap, receptorY, fieldBottom, laneCount, scrollWindowSeconds);
+        DrawReceptors(canvas, _laneWidths, laneGap, receptorY, laneCount);
+        DrawNotes(canvas, _laneWidths, laneGap, receptorY, fieldBottom, laneCount, scrollWindowSeconds);
         DrawFrame(canvas, dirtyRect, receptorY, topMargin);
         canvas.RestoreState();
     }

@@ -65,9 +65,6 @@ public sealed class RhythmGameEngine
     public int Combo { get; private set; }
     public int MaxCombo { get; private set; }
     public int MissCombo { get; private set; }
-    public int Score { get; private set; }
-    public string Grade { get; private set; } = "D";
-    public string Plate { get; private set; } = "";
     public string LastJudgmentText { get; private set; } = "READY";
     /// <summary>
     /// Incremented on every call to <see cref="RegisterJudgment"/>.
@@ -511,8 +508,18 @@ public sealed class RhythmGameEngine
             return;
 
         // --- Check if this press contributes to a pending chord ---
-        var pendingChord = _pendingChords
-            .FirstOrDefault(c => c.Notes.Any(n => n.Lane == lane) && !c.PressedLanes.Contains(lane));
+        PendingChord? pendingChord = null;
+        for (var ci = 0; ci < _pendingChords.Count; ci++)
+        {
+            var c = _pendingChords[ci];
+            if (c.PressedLanes.Contains(lane)) continue;
+            var hasLane = false;
+            for (var ni = 0; ni < c.Notes.Count; ni++)
+            {
+                if (c.Notes[ni].Lane == lane) { hasLane = true; break; }
+            }
+            if (hasLane) { pendingChord = c; break; }
+        }
 
         if (pendingChord != null)
         {
@@ -521,13 +528,18 @@ public sealed class RhythmGameEngine
 
             if (pendingChord.IsComplete)
             {
-                var worstJudgment = pendingChord.Notes
-                    .Select(n => PhoenixScoring.GetJudgment(CurrentTimeSeconds - n.TimeSeconds, this.JudgmentDifficulty))
-                    .OrderByDescending(j => j)
-                    .First();
-
-                foreach (var n in pendingChord.Notes)
+                var worstJudgment = HitJudgment.Perfect;
+                for (var ni = 0; ni < pendingChord.Notes.Count; ni++)
                 {
+                    var j = PhoenixScoring.GetJudgment(
+                        CurrentTimeSeconds - pendingChord.Notes[ni].TimeSeconds,
+                        JudgmentDifficulty);
+                    if (j > worstJudgment) worstJudgment = j;
+                }
+
+                for (var ni = 0; ni < pendingChord.Notes.Count; ni++)
+                {
+                    var n = pendingChord.Notes[ni];
                     n.Consumed = true;
                     if (n.Type == NoteType.HoldStart) ActivateHold(n);
                     _laneFlashTimes[n.Lane] = CurrentTimeSeconds;
@@ -540,30 +552,40 @@ public sealed class RhythmGameEngine
             return;
         }
 
-        // --- Find the best candidate on this lane ---
-        var candidate = _notes
-            .Where(n => !n.Consumed && n.Lane == lane &&
-                        (n.Type == NoteType.Tap || n.Type == NoteType.HoldStart))
-            .OrderBy(n => Math.Abs(n.TimeSeconds - CurrentTimeSeconds))
-            .FirstOrDefault();
+        // --- Find the best candidate on this lane (no LINQ) ---
+        PlayableNote? candidate = null;
+        var bestDelta = double.MaxValue;
+        for (var ni = 0; ni < _notes.Count; ni++)
+        {
+            var n = _notes[ni];
+            if (n.Consumed || n.Lane != lane ||
+                (n.Type != NoteType.Tap && n.Type != NoteType.HoldStart))
+                continue;
+            var absDelta = Math.Abs(n.TimeSeconds - CurrentTimeSeconds);
+            if (absDelta < bestDelta) { bestDelta = absDelta; candidate = n; }
+        }
 
         if (candidate is null) return;
 
         var delta = CurrentTimeSeconds - candidate.TimeSeconds;
-        var judgment = PhoenixScoring.GetJudgment(delta, this.JudgmentDifficulty);
+        var judgment = PhoenixScoring.GetJudgment(delta, JudgmentDifficulty);
         if (judgment == HitJudgment.Miss) return;
 
         if (candidate.Type == NoteType.HoldStart && delta < 0)
             return;
 
-        // Check for chord siblings
-        var chordMembers = _notes
-            .Where(n => !n.Consumed &&
-                        (n.Type == NoteType.Tap || n.Type == NoteType.HoldStart) &&
-                        Math.Abs(n.TimeSeconds - candidate.TimeSeconds) <= ChordWindowSeconds)
-            .ToList();
+        // Check for chord siblings (no LINQ, no ToList allocation)
+        var chordMemberCount = 0;
+        for (var ni = 0; ni < _notes.Count; ni++)
+        {
+            var n = _notes[ni];
+            if (!n.Consumed &&
+                (n.Type == NoteType.Tap || n.Type == NoteType.HoldStart) &&
+                Math.Abs(n.TimeSeconds - candidate.TimeSeconds) <= ChordWindowSeconds)
+                chordMemberCount++;
+        }
 
-        if (chordMembers.Count == 1)
+        if (chordMemberCount == 1)
         {
             candidate.Consumed = true;
             if (candidate.Type == NoteType.HoldStart)
@@ -573,7 +595,14 @@ public sealed class RhythmGameEngine
         else
         {
             var chord = new PendingChord();
-            chord.Notes.AddRange(chordMembers);
+            for (var ni = 0; ni < _notes.Count; ni++)
+            {
+                var n = _notes[ni];
+                if (!n.Consumed &&
+                    (n.Type == NoteType.Tap || n.Type == NoteType.HoldStart) &&
+                    Math.Abs(n.TimeSeconds - candidate.TimeSeconds) <= ChordWindowSeconds)
+                    chord.Notes.Add(n);
+            }
             chord.PressedLanes.Add(lane);
             _laneFlashTimes[lane] = CurrentTimeSeconds;
             _pendingChords.Add(chord);
@@ -626,6 +655,46 @@ public sealed class RhythmGameEngine
 
     // Running weighted sum for incremental score calculation — avoids per-hit dictionary enumeration
     private double _weightedSum;
+    private bool _scoreDirty = false;
+
+    /// <summary>
+    /// Final score (0–1,000,000). Computed lazily — only recalculated when
+    /// accessed after a judgment has been registered since the last read.
+    /// Safe to read every frame from the results screen; zero-cost during gameplay.
+    /// </summary>
+    public int Score
+    {
+        get
+        {
+            if (_scoreDirty)
+            {
+                _cachedScore = PhoenixScoring.CalculateScoreIncremental(_weightedSum, TotalNoteCount, MaxCombo);
+                _cachedGrade = PhoenixScoring.CalculateGrade(_cachedScore);
+                _cachedPlate = PhoenixScoring.CalculatePlate(_counts, TotalNoteCount);
+                _scoreDirty = false;
+            }
+            return _cachedScore;
+        }
+        private set => _cachedScore = value;
+    }
+
+    private int _cachedScore;
+
+    public string Grade
+    {
+        get { _ = Score; return _cachedGrade; }
+        private set => _cachedGrade = value;
+    }
+
+    private string _cachedGrade = "D";
+
+    public string Plate
+    {
+        get { _ = Score; return _cachedPlate; }
+        private set => _cachedPlate = value;
+    }
+
+    private string _cachedPlate = "";
 
     private void RegisterJudgment(HitJudgment judgment)
     {
@@ -652,17 +721,13 @@ public sealed class RhythmGameEngine
             }
         }
 
-        // Record judgment on every lane that flashed within the last frame so the
-        // drawable can render per-lane effects (e.g. star burst for Perfect/Great).
         for (var i = 0; i < _laneFlashTimes.Length; i++)
         {
             if (CurrentTimeSeconds - _laneFlashTimes[i] < 0.05d)
                 _laneLastJudgment[i] = judgment;
         }
 
-        Score = PhoenixScoring.CalculateScoreIncremental(_weightedSum, TotalNoteCount, MaxCombo);
-        Grade = PhoenixScoring.CalculateGrade(Score);
-        Plate = PhoenixScoring.CalculatePlate(_counts, TotalNoteCount);
+        _scoreDirty = true;
         LastJudgmentText = PhoenixScoring.GetJudgmentText(judgment);
     }
 
@@ -676,6 +741,10 @@ public sealed class RhythmGameEngine
             _counts[judgment] = 0;
 
         _weightedSum = 0d;
+        _scoreDirty = false;
+        _cachedScore = 0;
+        _cachedGrade = "D";
+        _cachedPlate = "";
 
         foreach (var note in _notes)
         {
@@ -701,12 +770,9 @@ public sealed class RhythmGameEngine
         Combo = 0;
         MaxCombo = 0;
         MissCombo = 0;
-        Score = 0;
         JudgmentSequence = 0;
-        Grade = "D";
-        Plate = "";
-        LastJudgmentText = Chart is null ? "READY" : "SELECT SONG";
         IsPlaying = false;
+        LastJudgmentText = Chart is null ? "READY" : "SELECT SONG";
     }
 
     private static double SecondsToBeatApprox(double seconds, IReadOnlyList<BpmChange> bpmChanges)

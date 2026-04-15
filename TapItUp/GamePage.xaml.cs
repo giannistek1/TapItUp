@@ -1124,7 +1124,7 @@ public partial class GamePage : ContentPage
             return;
         }
 
-        var baseSize = DeviceInfo.Platform == DevicePlatform.Android || DeviceInfo.Platform == DevicePlatform.iOS ? 75 : 90;
+        var baseSize = DeviceInfo.Platform == DevicePlatform.Android || DeviceInfo.Platform == DevicePlatform.iOS ? 84 : 90;
         var baseFontSize = DeviceInfo.Platform == DevicePlatform.Android || DeviceInfo.Platform == DevicePlatform.iOS ? 35 : 40;
 
         var portraitButton = new Button
