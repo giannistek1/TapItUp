@@ -27,8 +27,8 @@
         <ApplicationId>nl.djannie.TapItUp</ApplicationId>
 
         <!-- Versions -->
-        <PackageVersion>0.1.1</PackageVersion>
-        <ApplicationVersion>2</ApplicationVersion>
+        <PackageVersion>0.1.2</PackageVersion>
+        <ApplicationVersion>3</ApplicationVersion>
 
         <!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
         <WindowsPackageType>None</WindowsPackageType>

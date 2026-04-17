@@ -149,6 +149,7 @@ public partial class GamePage : ContentPage
 
                 _engine.JudgmentDifficulty = gameStartData.JudgmentDifficulty;
                 AnimationsEnabled = gameStartData.AnimationsEnabled;
+                _notesDisplayOffsetSeconds = gameStartData.AudioOffsetMs / 1000d;
 
                 System.Diagnostics.Debug.WriteLine($"   Song: {_song.Title}");
                 System.Diagnostics.Debug.WriteLine($"   Artist: {_song.Artist}");
@@ -1345,6 +1346,7 @@ public partial class GamePage : ContentPage
         public string? RemoteAudioUrl { get; set; }
         public JudgmentDifficulty JudgmentDifficulty { get; set; } = JudgmentDifficulty.Standard;
         public bool AnimationsEnabled { get; set; } = true;
+        public int AudioOffsetMs { get; set; } = 0;
     }
 
     private sealed class GameResultsData

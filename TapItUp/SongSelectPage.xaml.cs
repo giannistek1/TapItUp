@@ -111,6 +111,8 @@ public partial class SongSelectPage : ContentPage
     public string AvText => $"AV {_av}";
 
     private const string AnimationsEnabledKey = "AnimationsEnabled";
+    private const string AudioOffsetMsKey = "AudioOffsetMs";
+    private const string IsSettingsVisibleKey = "IsSettingsVisible";
 
     private bool _animationsEnabled;
     public bool AnimationsEnabled
@@ -125,6 +127,46 @@ public partial class SongSelectPage : ContentPage
         }
     }
 
+    /// <summary>
+    /// Audio offset in milliseconds. Positive values delay the arrows relative to the audio
+    /// (use when audio arrives late, e.g. Bluetooth). Negative values advance the arrows.
+    /// Clamped from -0 to 4000 ms.
+    /// </summary>
+    private int _audioOffsetMs;
+    public int AudioOffsetMs
+    {
+        get => _audioOffsetMs;
+        set
+        {
+            var clamped = Math.Clamp(value, -0, 4000);
+            if (_audioOffsetMs == clamped) return;
+            _audioOffsetMs = clamped;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(AudioOffsetText));
+            Preferences.Default.Set(AudioOffsetMsKey, clamped);
+        }
+    }
+
+    public string AudioOffsetText => _audioOffsetMs == 0
+        ? "Offset: 0 ms"
+        : _audioOffsetMs > 0 ? $"Offset: +{_audioOffsetMs} ms" : $"Offset: {_audioOffsetMs} ms";
+
+    private bool _isSettingsVisible;
+    public bool IsSettingsVisible
+    {
+        get => _isSettingsVisible;
+        set
+        {
+            if (_isSettingsVisible == value) return;
+            _isSettingsVisible = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(CommandsButtonText));
+            Preferences.Default.Set(IsSettingsVisibleKey, value);
+        }
+    }
+
+    public string CommandsButtonText => IsSettingsVisible ? "⚙ Commands ▲" : "⚙ Commands ▼";
+
     public SongSelectPage()
     {
         InitializeComponent();
@@ -133,6 +175,7 @@ public partial class SongSelectPage : ContentPage
         // Load persisted animation preference; fall back to platform default
         var platformDefault = DeviceInfo.Platform != DevicePlatform.Android;
         AnimationsEnabled = Preferences.Default.Get(AnimationsEnabledKey, platformDefault);
+        AudioOffsetMs = Preferences.Default.Get(AudioOffsetMsKey, 0);
 
         Routing.RegisterRoute("GamePage", typeof(GamePage));
         SizeChanged += OnPageSizeChanged;
@@ -870,7 +913,8 @@ public partial class SongSelectPage : ContentPage
                 NoteSkin = _noteSkin,
                 RemoteAudioUrl = audioUrl,
                 JudgmentDifficulty = _judgmentDifficulty,
-                AnimationsEnabled = _animationsEnabled
+                AnimationsEnabled = _animationsEnabled,
+                AudioOffsetMs = _audioOffsetMs
             };
 
             var encodedJson = Uri.EscapeDataString(JsonSerializer.Serialize(startData));
@@ -964,6 +1008,10 @@ public partial class SongSelectPage : ContentPage
     }
 
     private void OnAvChanged(object sender, ValueChangedEventArgs e) => Av = (int)Math.Round(e.NewValue);
+    private void OnCommandsToggled(object sender, EventArgs e) => IsSettingsVisible = !IsSettingsVisible;
+
+    private void OnAudioOffsetChanged(object sender, ValueChangedEventArgs e) =>
+        AudioOffsetMs = (int)Math.Round(e.NewValue);
 }
 
 public class SongListItem
@@ -984,4 +1032,9 @@ public class GameStartData
     public string? RemoteAudioUrl { get; set; }
     public JudgmentDifficulty JudgmentDifficulty { get; set; } = JudgmentDifficulty.Standard;
     public bool AnimationsEnabled { get; set; } = true;
+    /// <summary>
+    /// Milliseconds to shift note timing relative to audio playback.
+    /// Positive = arrows arrive later (compensates for late audio, e.g. Bluetooth).
+    /// </summary>
+    public int AudioOffsetMs { get; set; } = 0;
 }
