@@ -7,13 +7,26 @@ public sealed class NoteFieldDrawable : IDrawable
 {
     private float _noteScale = 0.9f;
 
-    private static readonly Color[] LaneColors = [
+    private static readonly Color[] LaneColors =
+    [
         Color.FromArgb("#00C2FF"), // Blue (bottom left)
         Color.FromArgb("#FF2D2D"), // Red (top left)
         Color.FromArgb("#FFE45E"), // Yellow (center)
         Color.FromArgb("#FF2D2D"), // Red (top right)
         Color.FromArgb("#00C2FF")  // Blue (bottom right)
     ];
+
+    private static readonly Color BackgroundColor = Color.FromArgb("#090212");
+    private static readonly Color LaneBackgroundColor = Color.FromArgb("#0B0710");
+    private static readonly Color YellowGlowColor = Color.FromArgb("#FFE45E");
+    private static readonly Color OuterGlowColor = Color.FromArgb("#C0DFFF");
+    private static readonly Color ParticleBlueColor = Color.FromArgb("#B8D8FF");
+    private static readonly Color WhiteColor = Colors.White;
+    private static readonly Color SeparatorLineColor = Colors.White.WithAlpha(0.06f);
+    private static readonly Color FrameStrokeColor = Colors.White.WithAlpha(0.18f);
+    private static readonly Color FrameFontColor = Colors.White.WithAlpha(0.90f);
+    private static readonly Color ActiveHoldGlowFillColor = Colors.White.WithAlpha(0.06f);
+
     private readonly RhythmGameEngine _engine;
 
     // Image cache for different skins
@@ -28,20 +41,40 @@ public sealed class NoteFieldDrawable : IDrawable
     private static IImage? _grayNxa, _graycNxa;
     private static IImage? _grayOld, _graycOld;
 
-    // Fixed race condition: use Task to ensure proper initialization
     private static Task? _loadingTask;
     private static bool _imagesLoaded = false;
+    private static int _imageLoadVersion;
 
-    // Reusable per-frame note lists — avoids per-frame LINQ allocations
     private readonly List<PlayableNote> _visibleHolds = new(64);
     private readonly List<PlayableNote> _visibleNotes = new(128);
-    private readonly float[] _laneWidths = new float[10]; // reused every Draw call
+    private readonly float[] _laneWidths = new float[10];
+
+    private string _noteSkin = "Prime";
+    private string? _cachedSkin;
+    private int _cachedImageLoadVersion = -1;
+    private IImage? _cachedCenterImage;
+    private IImage? _cachedBlueArrowImage;
+    private IImage? _cachedRedArrowImage;
+    private IImage? _cachedGrayImage;
+    private IImage? _cachedGrayCenterImage;
 
     // Debug flag for note borders (default: false = no borders)
     public bool ShowNoteBorders { get; set; } = false;
 
     // Note skin property
-    public string NoteSkin { get; set; } = "Prime";
+    public string NoteSkin
+    {
+        get => _noteSkin;
+        set
+        {
+            var newSkin = string.IsNullOrWhiteSpace(value) ? "Prime" : value.Trim();
+            if (string.Equals(_noteSkin, newSkin, StringComparison.Ordinal))
+                return;
+
+            _noteSkin = newSkin;
+            _cachedSkin = null;
+        }
+    }
 
     /// <summary>
     /// Arrow Velocity (300–999). The visible scroll window is 720 / Av seconds,
@@ -109,6 +142,7 @@ public sealed class NoteFieldDrawable : IDrawable
             System.Diagnostics.Debug.WriteLine($"🖼️ Image loading summary - Old: Center={_centerOld != null}, Blue={_downleftOld != null}, Red={_upleftOld != null}");
             System.Diagnostics.Debug.WriteLine($"🖼️ Gray images - prime={_grayPrime != null}, grayc={_graycPrime != null}, fiestaex={_grayFiestaEx != null}, grayc_fiestaex={_graycFiestaEx != null}");
 
+            System.Threading.Interlocked.Increment(ref _imageLoadVersion);
             _imagesLoaded = true;
         }
         catch (Exception ex)
@@ -118,8 +152,85 @@ public sealed class NoteFieldDrawable : IDrawable
         }
     }
 
-    // Helper method to get the correct images based on selected skin
+    private void EnsureSkinCache()
+    {
+        var imageLoadVersion = System.Threading.Volatile.Read(ref _imageLoadVersion);
+
+        if (string.Equals(_cachedSkin, _noteSkin, StringComparison.Ordinal) &&
+            _cachedImageLoadVersion == imageLoadVersion)
+        {
+            return;
+        }
+
+        _cachedSkin = _noteSkin;
+        _cachedImageLoadVersion = imageLoadVersion;
+
+        if (_noteSkin.Equals("fiestaex", StringComparison.OrdinalIgnoreCase))
+        {
+            _cachedCenterImage = _centerFiestaEx;
+            _cachedBlueArrowImage = _downleftFiestaEx;
+            _cachedRedArrowImage = _upleftFiestaEx;
+            _cachedGrayImage = _grayFiestaEx;
+            _cachedGrayCenterImage = _graycFiestaEx;
+        }
+        else if (_noteSkin.Equals("old", StringComparison.OrdinalIgnoreCase))
+        {
+            _cachedCenterImage = _centerOld;
+            _cachedBlueArrowImage = _downleftOld;
+            _cachedRedArrowImage = _upleftOld;
+            _cachedGrayImage = _grayOld;
+            _cachedGrayCenterImage = _graycOld;
+        }
+        else if (_noteSkin.Equals("nxa", StringComparison.OrdinalIgnoreCase))
+        {
+            _cachedCenterImage = _centerNxa;
+            _cachedBlueArrowImage = _downleftNxa;
+            _cachedRedArrowImage = _upleftNxa;
+            _cachedGrayImage = _grayNxa;
+            _cachedGrayCenterImage = _graycNxa;
+        }
+        else
+        {
+            _cachedCenterImage = _centerPrime;
+            _cachedBlueArrowImage = _downleftPrime;
+            _cachedRedArrowImage = _upleftPrime;
+            _cachedGrayImage = _grayPrime;
+            _cachedGrayCenterImage = _graycPrime;
+        }
+    }
+
     private IImage? GetCenterImage()
+    {
+        EnsureSkinCache();
+        return _cachedCenterImage;
+    }
+
+    private IImage? GetBlueArrowImage()
+    {
+        EnsureSkinCache();
+        return _cachedBlueArrowImage;
+    }
+
+    private IImage? GetRedArrowImage()
+    {
+        EnsureSkinCache();
+        return _cachedRedArrowImage;
+    }
+
+    private IImage? GetGrayImage()
+    {
+        EnsureSkinCache();
+        return _cachedGrayImage;
+    }
+
+    private IImage? GetGrayCenterImage()
+    {
+        EnsureSkinCache();
+        return _cachedGrayCenterImage;
+    }
+
+    // Helper method to get the correct images based on selected skin
+    private IImage? GetCenterImageFallback()
     {
         return NoteSkin.ToLower() switch
         {
@@ -130,7 +241,7 @@ public sealed class NoteFieldDrawable : IDrawable
         };
     }
 
-    private IImage? GetBlueArrowImage()
+    private IImage? GetBlueArrowImageFallback()
     {
         return NoteSkin.ToLower() switch
         {
@@ -141,7 +252,7 @@ public sealed class NoteFieldDrawable : IDrawable
         };
     }
 
-    private IImage? GetRedArrowImage()
+    private IImage? GetRedArrowImageFallback()
     {
         return NoteSkin.ToLower() switch
         {
@@ -153,7 +264,7 @@ public sealed class NoteFieldDrawable : IDrawable
     }
 
     // New helpers for grayscale receptor images
-    private IImage? GetGrayImage()
+    private IImage? GetGrayImageFallback()
     {
         return NoteSkin.ToLower() switch
         {
@@ -164,7 +275,7 @@ public sealed class NoteFieldDrawable : IDrawable
         };
     }
 
-    private IImage? GetGrayCenterImage()
+    private IImage? GetGrayCenterImageFallback()
     {
         return NoteSkin.ToLower() switch
         {
@@ -356,8 +467,10 @@ public sealed class NoteFieldDrawable : IDrawable
 
     public void Draw(ICanvas canvas, RectF dirtyRect)
     {
+        EnsureSkinCache();
+
         canvas.SaveState();
-        canvas.FillColor = Color.FromArgb("#090212");
+        canvas.FillColor = BackgroundColor;
         canvas.FillRectangle(dirtyRect);
 
         var isDouble = _engine.IsDoubleChart;
@@ -454,46 +567,48 @@ public sealed class NoteFieldDrawable : IDrawable
         {
             float width = actualWidths[lane];
 
-            canvas.FillColor = Color.FromArgb("#0B0710");
+            canvas.FillColor = LaneBackgroundColor;
             canvas.FillRoundedRectangle(x, 18f, width, fieldBottom - 6f, 18f);
 
-            canvas.FillColor = Color.FromArgb("#0B0710").WithAlpha(0.04f);
+            canvas.SaveState();
+            canvas.FillColor = LaneBackgroundColor;
+            canvas.Alpha = 0.04f;
             canvas.FillRoundedRectangle(x, receptorY - 16f, width, fieldBottom - receptorY + 18f, 18f);
+            canvas.RestoreState();
 
             x += width + laneGap;
         }
 
-        // Subtle separator line across field (kept neutral and very faint)
-        canvas.StrokeColor = Colors.White.WithAlpha(0.06f);
+        canvas.StrokeColor = SeparatorLineColor;
         canvas.StrokeSize = 1f;
         canvas.DrawLine(0f, receptorY + 22f, dirtyRect.Width, receptorY + 22f);
     }
 
     private void DrawHoldBodies(ICanvas canvas, float[] actualWidths, float laneGap, float receptorY, float fieldBottom, int laneCount, double scrollWindowSeconds)
     {
-        float x = laneGap;
         var travelHeight = fieldBottom - receptorY - 18f;
         var badWindow = PhoenixScoring.GetBadWindow(JudgmentDifficulty.Standard);
         var notes = _engine.Notes;
 
+        _visibleHolds.Clear();
+        for (var i = 0; i < notes.Count; i++)
+        {
+            var n = notes[i];
+            if (n.Type == NoteType.HoldStart)
+                _visibleHolds.Add(n);
+        }
+
+        float x = laneGap;
         for (var lane = 0; lane < laneCount; lane++)
         {
             float width = actualWidths[lane];
             var centerX = x + width / 2f;
             var laneColorIndex = lane % 5;
 
-            // Build visible holds without LINQ allocations
-            _visibleHolds.Clear();
-            for (var i = 0; i < notes.Count; i++)
-            {
-                var n = notes[i];
-                if (n.Lane == lane && n.Type == NoteType.HoldStart)
-                    _visibleHolds.Add(n);
-            }
-
             for (var hi = 0; hi < _visibleHolds.Count; hi++)
             {
                 var holdStart = _visibleHolds[hi];
+                if (holdStart.Lane != lane) continue;
                 if (holdStart.HoldPartner == null) continue;
 
                 var holdEnd = holdStart.HoldPartner;
@@ -509,7 +624,8 @@ public sealed class NoteFieldDrawable : IDrawable
                 var startNormalized = (float)(startDelta / scrollWindowSeconds);
                 var endNormalized = (float)(endDelta / scrollWindowSeconds);
 
-                float visibleStartY, visibleEndY;
+                float visibleStartY;
+                float visibleEndY;
 
                 if (isActiveHold)
                 {
@@ -530,23 +646,19 @@ public sealed class NoteFieldDrawable : IDrawable
                 var holdWidth = IsLandscapeMode ? width * 0.60f : width * 0.65f;
                 var isHoldCurrentlyActive = _engine.IsLaneHoldActive(lane);
 
-                Color bodyColor;
+                float fillAlpha;
                 if (isActiveHold && isHoldCurrentlyActive)
-                {
-                    var pulseIntensity = 0.8f + 0.2f * MathF.Sin((float)_engine.CurrentTimeSeconds * 8f);
-                    bodyColor = LaneColors[laneColorIndex].WithAlpha(pulseIntensity);
-                }
+                    fillAlpha = 0.8f + 0.2f * MathF.Sin((float)_engine.CurrentTimeSeconds * 8f);
                 else if (isActiveHold)
-                {
-                    bodyColor = LaneColors[laneColorIndex].WithAlpha(0.4f);
-                }
+                    fillAlpha = 0.4f;
                 else
-                {
-                    bodyColor = LaneColors[laneColorIndex].WithAlpha(0.6f);
-                }
+                    fillAlpha = 0.6f;
+
+                var strokeAlpha = isActiveHold && isHoldCurrentlyActive ? 1.0f : 0.8f;
 
                 canvas.SaveState();
-                canvas.FillColor = bodyColor;
+                canvas.FillColor = LaneColors[laneColorIndex];
+                canvas.Alpha = fillAlpha;
                 canvas.FillRoundedRectangle(
                     centerX - holdWidth / 2f,
                     visibleStartY,
@@ -554,16 +666,15 @@ public sealed class NoteFieldDrawable : IDrawable
                     visibleEndY - visibleStartY,
                     4f);
 
-                var edgeAlpha = isActiveHold && isHoldCurrentlyActive ? 1.0f : 0.8f;
-                canvas.StrokeColor = LaneColors[laneColorIndex].WithAlpha(edgeAlpha);
+                canvas.StrokeColor = LaneColors[laneColorIndex];
                 canvas.StrokeSize = isActiveHold && isHoldCurrentlyActive ? 3f : 2f;
+                canvas.Alpha = strokeAlpha;
                 canvas.DrawRoundedRectangle(
                     centerX - holdWidth / 2f,
                     visibleStartY,
                     holdWidth,
                     visibleEndY - visibleStartY,
                     4f);
-
                 canvas.RestoreState();
             }
 
@@ -573,31 +684,31 @@ public sealed class NoteFieldDrawable : IDrawable
 
     private void DrawNotes(ICanvas canvas, float[] actualWidths, float laneGap, float receptorY, float fieldBottom, int laneCount, double scrollWindowSeconds)
     {
-        float x = laneGap;
         var travelHeight = fieldBottom - receptorY - 18f;
         var badWindow = PhoenixScoring.GetBadWindow(_engine.JudgmentDifficulty);
         var notes = _engine.Notes;
 
+        _visibleNotes.Clear();
+        for (var i = 0; i < notes.Count; i++)
+        {
+            var n = notes[i];
+            if (!n.Consumed)
+                _visibleNotes.Add(n);
+        }
+
+        float x = laneGap;
         for (var lane = 0; lane < laneCount; lane++)
         {
             float width = actualWidths[lane];
             var centerX = x + width / 2f;
             var laneShapeIndex = lane % 5;
 
-            // Build visible notes without LINQ allocations
-            _visibleNotes.Clear();
-            for (var i = 0; i < notes.Count; i++)
-            {
-                var n = notes[i];
-                if (n.Lane == lane && !n.Consumed)
-                    _visibleNotes.Add(n);
-            }
-
             for (var ni = 0; ni < _visibleNotes.Count; ni++)
             {
                 var note = _visibleNotes[ni];
-                var deltaSeconds = note.TimeSeconds - _engine.CurrentTimeSeconds;
+                if (note.Lane != lane) continue;
 
+                var deltaSeconds = note.TimeSeconds - _engine.CurrentTimeSeconds;
                 if (deltaSeconds < -badWindow || deltaSeconds > scrollWindowSeconds)
                     continue;
 
@@ -623,7 +734,7 @@ public sealed class NoteFieldDrawable : IDrawable
                         DrawNoteShape(canvas, laneShapeIndex, size * 1.1f, LaneColors[laneShapeIndex]);
                         if (ShowNoteBorders)
                         {
-                            canvas.StrokeColor = Colors.White;
+                            canvas.StrokeColor = WhiteColor;
                             canvas.StrokeSize = 3f;
                             if (laneShapeIndex == 2)
                                 canvas.DrawRectangle(-size * 0.6f, -size * 0.6f, size * 1.2f, size * 1.2f);
@@ -633,17 +744,24 @@ public sealed class NoteFieldDrawable : IDrawable
                         break;
 
                     case NoteType.HoldEnd:
-                        DrawNoteShape(canvas, laneShapeIndex, size, LaneColors[laneShapeIndex].WithAlpha(0.8f));
+                        canvas.SaveState();
+                        canvas.Alpha = 0.8f;
+                        DrawNoteShape(canvas, laneShapeIndex, size, LaneColors[laneShapeIndex]);
+                        canvas.RestoreState();
                         break;
 
                     case NoteType.HoldBody:
-                        canvas.FillColor = LaneColors[laneShapeIndex].WithAlpha(0.6f);
+                        canvas.SaveState();
+                        canvas.FillColor = LaneColors[laneShapeIndex];
+                        canvas.Alpha = 0.6f;
                         canvas.FillEllipse(-size * 0.2f, -size * 0.2f, size * 0.4f, size * 0.4f);
+                        canvas.RestoreState();
                         break;
                 }
 
                 canvas.RestoreState();
             }
+
             x += width + laneGap;
         }
     }
@@ -671,7 +789,6 @@ public sealed class NoteFieldDrawable : IDrawable
             else
                 receptorSize = MathF.Min(width * _noteScale, 44f);
 
-            // Shape/color index is always within the 5-lane pattern
             var laneShapeIndex = lane % 5;
 
             canvas.SaveState();
@@ -680,7 +797,7 @@ public sealed class NoteFieldDrawable : IDrawable
             if (isHoldActive)
             {
                 var glowSize = receptorSize * 1.3f;
-                canvas.FillColor = Colors.White.WithAlpha(0.06f);
+                canvas.FillColor = ActiveHoldGlowFillColor;
                 if (laneShapeIndex == 2)
                     canvas.FillRoundedRectangle(-glowSize / 2f, -glowSize / 2f, glowSize, glowSize, 8f);
                 else
@@ -693,11 +810,9 @@ public sealed class NoteFieldDrawable : IDrawable
 
             if (isStarworthy)
             {
-                // ── 5. Scale punch ────────────────────────────────────────────────────
-                // Receptor scale: 1.0 → 1.1 → 1.0 over ~120 ms, eased with a sine arch
                 const double punchDuration = 0.12d;
                 var punchT = (float)Math.Clamp(flashAge / punchDuration, 0d, 1d);
-                var scaleFactor = 1.0f + 0.10f * MathF.Sin(punchT * MathF.PI); // arch: 0→peak→0
+                var scaleFactor = 1.0f + 0.10f * MathF.Sin(punchT * MathF.PI);
 
                 canvas.SaveState();
                 canvas.Scale(scaleFactor, scaleFactor);
@@ -713,7 +828,8 @@ public sealed class NoteFieldDrawable : IDrawable
                 var yellowAlpha = Math.Clamp(glow * 0.5f * pulse, 0f, 1f);
 
                 canvas.SaveState();
-                canvas.FillColor = Color.FromArgb("#FFE45E").WithAlpha(yellowAlpha);
+                canvas.FillColor = YellowGlowColor;
+                canvas.Alpha = yellowAlpha;
 
                 if (laneShapeIndex == 2)
                 {
@@ -741,15 +857,19 @@ public sealed class NoteFieldDrawable : IDrawable
             var grayCenter = GetGrayCenterImage();
             if (grayCenter != null)
             {
+                canvas.SaveState();
                 canvas.Alpha = 0.90f + glow * 0.10f;
                 canvas.DrawImage(grayCenter, -size / 2f, -size / 2f, size, size);
-                canvas.Alpha = 1f;
+                canvas.RestoreState();
 
                 if (ShowNoteBorders)
                 {
-                    canvas.StrokeColor = Colors.White.WithAlpha(0.55f + glow * 0.25f);
+                    canvas.SaveState();
+                    canvas.StrokeColor = WhiteColor;
                     canvas.StrokeSize = isHoldActive ? 4f : 3f;
+                    canvas.Alpha = 0.55f + glow * 0.25f;
                     canvas.DrawRectangle(-size / 2f, -size / 2f, size, size);
+                    canvas.RestoreState();
                 }
 
                 return;
@@ -758,26 +878,37 @@ public sealed class NoteFieldDrawable : IDrawable
             var centerImage = GetCenterImage();
             if (centerImage != null)
             {
+                canvas.SaveState();
                 canvas.Alpha = 0.20f + glow * 0.40f;
                 canvas.DrawImage(centerImage, -size / 2f, -size / 2f, size, size);
-                canvas.Alpha = 1f;
+                canvas.RestoreState();
 
                 if (ShowNoteBorders)
                 {
-                    canvas.StrokeColor = LaneColors[lane].WithAlpha(0.70f + glow * 0.25f);
+                    canvas.SaveState();
+                    canvas.StrokeColor = LaneColors[lane];
                     canvas.StrokeSize = isHoldActive ? 4f : 3f;
+                    canvas.Alpha = 0.70f + glow * 0.25f;
                     canvas.DrawRectangle(-size / 2f, -size / 2f, size, size);
+                    canvas.RestoreState();
                 }
             }
             else
             {
-                canvas.FillColor = Colors.White.WithAlpha(0.18f + glow * 0.4f);
+                canvas.SaveState();
+                canvas.FillColor = WhiteColor;
+                canvas.Alpha = 0.18f + glow * 0.4f;
                 canvas.FillRectangle(-size / 2f, -size / 2f, size, size);
+                canvas.RestoreState();
+
                 if (ShowNoteBorders)
                 {
-                    canvas.StrokeColor = Colors.White.WithAlpha(0.7f);
+                    canvas.SaveState();
+                    canvas.StrokeColor = WhiteColor;
                     canvas.StrokeSize = 2f;
+                    canvas.Alpha = 0.7f;
                     canvas.DrawRectangle(-size / 2f, -size / 2f, size, size);
+                    canvas.RestoreState();
                 }
             }
         }
@@ -803,20 +934,20 @@ public sealed class NoteFieldDrawable : IDrawable
         if (gray != null)
         {
             canvas.SaveState();
-
             if (rotation != 0f)
                 canvas.Rotate(rotation);
 
-            canvas.Alpha = 1f;
             canvas.DrawImage(gray, -size / 2f, -size / 2f, size, size);
-            canvas.Alpha = 1f;
             canvas.RestoreState();
 
             if (ShowNoteBorders)
             {
-                canvas.StrokeColor = Colors.White.WithAlpha(0.70f + glow * 0.25f);
+                canvas.SaveState();
+                canvas.StrokeColor = WhiteColor;
                 canvas.StrokeSize = isHoldActive ? 4f : 3f;
+                canvas.Alpha = 0.70f + glow * 0.25f;
                 canvas.DrawEllipse(-size / 2f, -size / 2f, size, size);
+                canvas.RestoreState();
             }
 
             return;
@@ -848,26 +979,30 @@ public sealed class NoteFieldDrawable : IDrawable
         if (image != null)
         {
             canvas.SaveState();
-            if (fallbackRotation != 0f) canvas.Rotate(fallbackRotation);
+            if (fallbackRotation != 0f)
+                canvas.Rotate(fallbackRotation);
+
             canvas.Alpha = 0.20f + glow * 0.40f;
             canvas.DrawImage(image, -size / 2f, -size / 2f, size, size);
-            canvas.Alpha = 1f;
             canvas.RestoreState();
 
             if (ShowNoteBorders)
             {
-                canvas.StrokeColor = Colors.White.WithAlpha(0.70f + glow * 0.25f);
+                canvas.SaveState();
+                canvas.StrokeColor = WhiteColor;
                 canvas.StrokeSize = isHoldActive ? 4f : 3f;
+                canvas.Alpha = 0.70f + glow * 0.25f;
                 canvas.DrawEllipse(-size / 2f, -size / 2f, size, size);
+                canvas.RestoreState();
             }
         }
         else
         {
-            canvas.FillColor = LaneColors[lane].WithAlpha(0.20f + glow * 0.40f);
+            canvas.FillColor = LaneColors[lane];
 
             if (ShowNoteBorders)
             {
-                canvas.StrokeColor = Colors.White.WithAlpha(0.70f + glow * 0.25f);
+                canvas.StrokeColor = WhiteColor;
                 canvas.StrokeSize = isHoldActive ? 4f : 3f;
             }
 
@@ -885,9 +1020,12 @@ public sealed class NoteFieldDrawable : IDrawable
                 canvas.DrawImage(centerImage, -size / 2f, -size / 2f, size, size);
                 if (ShowNoteBorders)
                 {
-                    canvas.StrokeColor = Colors.White.WithAlpha(0.80f);
+                    canvas.SaveState();
+                    canvas.StrokeColor = WhiteColor;
                     canvas.StrokeSize = 2f;
+                    canvas.Alpha = 0.80f;
                     canvas.DrawRectangle(-size / 2f, -size / 2f, size, size);
+                    canvas.RestoreState();
                 }
             }
             else
@@ -896,9 +1034,12 @@ public sealed class NoteFieldDrawable : IDrawable
                 canvas.FillRectangle(-size / 2f, -size / 2f, size, size);
                 if (ShowNoteBorders)
                 {
-                    canvas.StrokeColor = Colors.White.WithAlpha(0.80f);
+                    canvas.SaveState();
+                    canvas.StrokeColor = WhiteColor;
                     canvas.StrokeSize = 2f;
+                    canvas.Alpha = 0.80f;
                     canvas.DrawRectangle(-size / 2f, -size / 2f, size, size);
+                    canvas.RestoreState();
                 }
             }
         }
@@ -931,9 +1072,12 @@ public sealed class NoteFieldDrawable : IDrawable
 
             if (ShowNoteBorders)
             {
-                canvas.StrokeColor = Colors.White.WithAlpha(0.80f);
+                canvas.SaveState();
+                canvas.StrokeColor = WhiteColor;
                 canvas.StrokeSize = 2f;
+                canvas.Alpha = 0.80f;
                 canvas.DrawEllipse(-size / 2f, -size / 2f, size, size);
+                canvas.RestoreState();
             }
         }
         else
@@ -941,7 +1085,7 @@ public sealed class NoteFieldDrawable : IDrawable
             canvas.FillColor = color;
             if (ShowNoteBorders)
             {
-                canvas.StrokeColor = Colors.White.WithAlpha(0.80f);
+                canvas.StrokeColor = WhiteColor;
                 canvas.StrokeSize = 2f;
             }
             DrawDiagonalArrow(canvas, lane, size);
@@ -1025,71 +1169,68 @@ public sealed class NoteFieldDrawable : IDrawable
 
     private static void DrawFrame(ICanvas canvas, RectF dirtyRect, float receptorY, float topMargin)
     {
-        canvas.StrokeColor = Colors.White.WithAlpha(0.18f);
+        canvas.StrokeColor = FrameStrokeColor;
         canvas.StrokeSize = 3f;
         canvas.DrawRoundedRectangle(4f, topMargin - 8f, dirtyRect.Width - 8f, dirtyRect.Height - topMargin - 8f, 18f);
 
-        canvas.FontColor = Colors.White.WithAlpha(0.90f);
+        canvas.FontColor = FrameFontColor;
         canvas.FontSize = 14f;
     }
 
     private static void DrawStarBurst(ICanvas canvas, int lane, float receptorSize, double flashAge, HitJudgment judgment)
     {
-        const double TotalDuration = 0.30d;
-        var t = (float)Math.Clamp(flashAge / TotalDuration, 0d, 1d);
-
-        // ── 1. Base flash ────────────────────────────────────────────────────────
-        // 0–100 ms: ease-out white overlay that covers the receptor area
         const double flashDuration = 0.10d;
         if (flashAge <= flashDuration)
         {
-            var ft = (float)(flashAge / flashDuration);                     // 0→1
-            var flashAlpha = Math.Clamp(1.0f - ft * ft, 0f, 0.95f);        // ease-out
-            canvas.FillColor = Colors.White.WithAlpha(flashAlpha);
+            var ft = (float)(flashAge / flashDuration);
+            var flashAlpha = Math.Clamp(1.0f - ft * ft, 0f, 0.95f);
+
+            canvas.SaveState();
+            canvas.FillColor = WhiteColor;
+            canvas.Alpha = flashAlpha;
+
             if (lane == 2)
                 canvas.FillRectangle(-receptorSize / 2f, -receptorSize / 2f, receptorSize, receptorSize);
             else
                 canvas.FillEllipse(-receptorSize / 2f, -receptorSize / 2f, receptorSize, receptorSize);
+
+            canvas.RestoreState();
         }
 
-        // ── 2. Radial glow ───────────────────────────────────────────────────────
-        // Soft white-blue halo expands 1x → 2x receptor size over 250 ms
         const double glowDuration = 0.25d;
         if (flashAge <= glowDuration)
         {
-            var gt = (float)(flashAge / glowDuration);                      // 0→1
+            var gt = (float)(flashAge / glowDuration);
             var glowAlpha = Math.Clamp((1.0f - gt) * 0.55f, 0f, 1f);
-            var glowRadius = receptorSize * (0.5f + gt * 1.0f);            // 0.5x → 1.5x half-radius
+            var glowRadius = receptorSize * (0.5f + gt * 1.0f);
+            var coreRadius = glowRadius * 0.55f;
 
-            // Slightly blue-tinted outer ring
-            canvas.FillColor = Color.FromArgb("#C0DFFF").WithAlpha(glowAlpha * 0.60f);
+            canvas.SaveState();
+            canvas.FillColor = OuterGlowColor;
+            canvas.Alpha = glowAlpha * 0.60f;
             canvas.FillEllipse(-glowRadius, -glowRadius, glowRadius * 2f, glowRadius * 2f);
 
-            // Pure white inner core
-            var coreRadius = glowRadius * 0.55f;
-            canvas.FillColor = Colors.White.WithAlpha(glowAlpha * 0.80f);
+            canvas.FillColor = WhiteColor;
+            canvas.Alpha = glowAlpha * 0.80f;
             canvas.FillEllipse(-coreRadius, -coreRadius, coreRadius * 2f, coreRadius * 2f);
+            canvas.RestoreState();
         }
 
-        // ── 3. Shine sweep ───────────────────────────────────────────────────────
-        // Elongated diagonal streak (top-left → bottom-right) over 0–120 ms
         const double shineDuration = 0.12d;
         if (flashAge <= shineDuration)
         {
-            var st = (float)(flashAge / shineDuration);                     // 0→1
+            var st = (float)(flashAge / shineDuration);
             var shineAlpha = Math.Clamp(1.0f - st, 0f, 0.85f);
 
             canvas.SaveState();
-            canvas.Rotate(-45f);                                            // align streak diagonally
+            canvas.Rotate(-45f);
 
-            // Streak: wide at centre, tapers at ends → draw as filled oval
-            var streakLength = receptorSize * (1.2f + st * 0.8f);          // grows as it sweeps
+            var streakLength = receptorSize * (1.2f + st * 0.8f);
             var streakWidth = receptorSize * 0.28f;
-
-            // Offset the streak so it starts top-left and moves to bottom-right
             var sweepOffset = receptorSize * (st - 0.5f) * 1.4f;
 
-            canvas.FillColor = Colors.White.WithAlpha(shineAlpha);
+            canvas.FillColor = WhiteColor;
+            canvas.Alpha = shineAlpha;
             canvas.FillEllipse(
                 sweepOffset - streakLength / 2f,
                 -streakWidth / 2f,
@@ -1099,31 +1240,28 @@ public sealed class NoteFieldDrawable : IDrawable
             canvas.RestoreState();
         }
 
-        // ── 4. Particle sparkles ─────────────────────────────────────────────────
-        // 8 small particles burst outward from the centre and fade over 300 ms
         const double particleDuration = 0.30d;
         if (flashAge <= particleDuration)
         {
             var pt = (float)(flashAge / particleDuration);
             var particleAlpha = Math.Clamp(1.0f - pt, 0f, 0.90f);
-            const int ParticleCount = 8;
+            const int particleCount = 8;
 
-            for (var i = 0; i < ParticleCount; i++)
+            for (var i = 0; i < particleCount; i++)
             {
-                var angle = i * (MathF.PI * 2f / ParticleCount) + MathF.PI / 8f; // stagger 22.5°
-                var distance = receptorSize * (0.55f + pt * 1.10f);              // expand outward
+                var angle = i * (MathF.PI * 2f / particleCount) + MathF.PI / 8f;
+                var distance = receptorSize * (0.55f + pt * 1.10f);
                 var px = MathF.Cos(angle) * distance;
                 var py = MathF.Sin(angle) * distance;
 
-                var dotRadius = receptorSize * (0.07f - pt * 0.05f);             // shrink as they travel
+                var dotRadius = receptorSize * (0.07f - pt * 0.05f);
                 dotRadius = Math.Max(dotRadius, 1.5f);
 
-                // Alternate white and pale-blue sparkles for variety
-                canvas.FillColor = (i % 2 == 0)
-                    ? Colors.White.WithAlpha(particleAlpha)
-                    : Color.FromArgb("#B8D8FF").WithAlpha(particleAlpha);
-
+                canvas.SaveState();
+                canvas.FillColor = i % 2 == 0 ? WhiteColor : ParticleBlueColor;
+                canvas.Alpha = particleAlpha;
                 canvas.FillEllipse(px - dotRadius, py - dotRadius, dotRadius * 2f, dotRadius * 2f);
+                canvas.RestoreState();
             }
         }
     }

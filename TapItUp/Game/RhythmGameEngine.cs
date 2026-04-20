@@ -63,6 +63,11 @@ public sealed class RhythmGameEngine
     private const int MaxLanes = 10;
     private readonly List<PlayableNote>[] _laneNotes = new List<PlayableNote>[MaxLanes];
     private readonly int[] _laneNoteIndex = new int[MaxLanes];
+    private int _globalNoteIndex;
+
+    private readonly HashSet<PlayableNote> _pendingChordNoteSet = new();
+
+    private List<BpmChange> _sortedBpmChanges = [];
 
     public SscSong? Song { get; private set; }
     public SscChart? Chart { get; private set; }
@@ -128,16 +133,23 @@ public sealed class RhythmGameEngine
             chart.StepType.Equals("pump-double", StringComparison.OrdinalIgnoreCase) ||
             chart.StepType.Equals("dance-double", StringComparison.OrdinalIgnoreCase);
 
-        _notes = chart.Notes.Select(note => new PlayableNote
-        {
-            Lane = note.Lane,
-            Beat = note.Beat,
-            TimeSeconds = note.TimeSeconds,
-            Type = note.Type
-        }).ToList();
+        _sortedBpmChanges = song.BpmChanges
+            .OrderBy(change => change.Beat)
+            .ToList();
+
+        _notes = chart.Notes
+            .Select(note => new PlayableNote
+            {
+                Lane = note.Lane,
+                Beat = note.Beat,
+                TimeSeconds = note.TimeSeconds,
+                Type = note.Type
+            })
+            .OrderBy(note => note.TimeSeconds)
+            .ToList();
 
         LinkHoldNotes();
-        GenerateHoldTicks(song);
+        GenerateHoldTicks(song.TickCounts);
         ComputeChordGroupCount();
         BuildLaneIndex();
         ResetSession();
@@ -178,6 +190,36 @@ public sealed class RhythmGameEngine
         _laneNoteIndex[lane] = idx;
     }
 
+    private void AdvanceGlobalNoteIndex()
+    {
+        var idx = _globalNoteIndex;
+        while (idx < _notes.Count)
+        {
+            var note = _notes[idx];
+            if (note.Type == NoteType.HoldBody || note.Consumed || note.Missed)
+            {
+                idx++;
+                continue;
+            }
+
+            break;
+        }
+
+        _globalNoteIndex = idx;
+    }
+
+    private int GetChordWindowEndIndex(int startIndex, double referenceTimeSeconds)
+    {
+        var endIndex = startIndex;
+        while (endIndex < _notes.Count &&
+               _notes[endIndex].TimeSeconds - referenceTimeSeconds <= ChordWindowSeconds)
+        {
+            endIndex++;
+        }
+
+        return endIndex;
+    }
+
     // -------------------------------------------------------------------------
     // Chord group count
     // -------------------------------------------------------------------------
@@ -207,14 +249,11 @@ public sealed class RhythmGameEngine
     // Hold tick generation
     // -------------------------------------------------------------------------
 
-    private void GenerateHoldTicks(SscSong song)
+    private void GenerateHoldTicks(IReadOnlyList<TickCount> tickCounts)
     {
         _holdTicks = [];
 
-        var bpmChanges = song.BpmChanges;
-        var tickCounts = song.TickCounts;
-
-        if (bpmChanges.Count == 0) return;
+        if (_sortedBpmChanges.Count == 0) return;
 
         foreach (var head in _notes.Where(n => n.Type == NoteType.HoldStart && n.HoldPartner != null))
         {
@@ -232,7 +271,7 @@ public sealed class RhythmGameEngine
                 var ticksPerBeat = GetTicksPerBeat(currentBeat, tickCounts);
                 if (ticksPerBeat <= 0) break;
 
-                var bpm = GetBpmAt(currentBeat, bpmChanges);
+                var bpm = GetBpmAt(currentBeat, _sortedBpmChanges);
                 if (bpm <= 0) break;
 
                 var secondsPerTick = 60.0 / bpm / ticksPerBeat;
@@ -337,7 +376,6 @@ public sealed class RhythmGameEngine
 
         var badWindow = PhoenixScoring.GetBadWindow(this.JudgmentDifficulty);
 
-        // --- Expire pending chords whose bad window has passed ---
         for (var ci = _pendingChords.Count - 1; ci >= 0; ci--)
         {
             var chord = _pendingChords[ci];
@@ -355,47 +393,37 @@ public sealed class RhythmGameEngine
             }
 
             RegisterJudgment(HitJudgment.Miss);
+            foreach (var n in _pendingChords[ci].Notes) _pendingChordNoteSet.Remove(n);
             _pendingChords.RemoveAt(ci);
         }
 
-        // --- Regular note processing (with chord grouping for auto-miss) ---
-        // Build pending set without SelectMany/ToHashSet allocation
-        // by checking inline during the loop below.
+        AdvanceGlobalNoteIndex();
 
-        for (var ni = 0; ni < _notes.Count; ni++)
+        for (var ni = _globalNoteIndex; ni < _notes.Count; ni++)
         {
             var note = _notes[ni];
-            if (note.Consumed || note.Missed) continue;
-
-            // Skip notes already tracked in a pending chord
-            var inPendingChord = false;
-            for (var ci = 0; ci < _pendingChords.Count; ci++)
-            {
-                var chord = _pendingChords[ci];
-                for (var cni = 0; cni < chord.Notes.Count; cni++)
-                {
-                    if (chord.Notes[cni] == note) { inPendingChord = true; break; }
-                }
-                if (inPendingChord) break;
-            }
-            if (inPendingChord) continue;
+            if (note.Type == NoteType.HoldBody || note.Consumed || note.Missed) continue;
+            if (note.TimeSeconds - elapsedSeconds > badWindow) break;
+            if (_pendingChordNoteSet.Contains(note)) continue;
 
             var delta = elapsedSeconds - note.TimeSeconds;
 
-            // Pre-press: button already held when a hold head arrives
             if (note.Type == NoteType.HoldStart && !_laneHoldActive[note.Lane] && _lanePressed[note.Lane])
             {
                 if (delta >= -PreHoldAcceptanceSeconds && delta <= badWindow)
                 {
-                    // Check for chord siblings (hold-starts near the same time)
+                    var chordEndIndex = GetChordWindowEndIndex(ni, note.TimeSeconds);
                     var chordCount = 0;
-                    for (var si = 0; si < _notes.Count; si++)
+                    var allPressed = true;
+
+                    for (var si = ni; si < chordEndIndex; si++)
                     {
                         var sn = _notes[si];
-                        if (!sn.Consumed && !sn.Missed &&
-                            sn.Type == NoteType.HoldStart &&
-                            Math.Abs(sn.TimeSeconds - note.TimeSeconds) <= ChordWindowSeconds)
-                            chordCount++;
+                        if (sn.Consumed || sn.Missed || sn.Type != NoteType.HoldStart) continue;
+
+                        chordCount++;
+                        if (!_lanePressed[sn.Lane])
+                            allPressed = false;
                     }
 
                     if (chordCount == 1)
@@ -403,42 +431,22 @@ public sealed class RhythmGameEngine
                         ActivateHold(note);
                         RegisterJudgment(HitJudgment.Perfect);
                     }
-                    else
+                    else if (allPressed)
                     {
-                        // Only activate if all chord lanes are pressed
-                        var allPressed = true;
-                        for (var si = 0; si < _notes.Count; si++)
+                        for (var si = ni; si < chordEndIndex; si++)
                         {
                             var sn = _notes[si];
-                            if (!sn.Consumed && !sn.Missed &&
-                                sn.Type == NoteType.HoldStart &&
-                                Math.Abs(sn.TimeSeconds - note.TimeSeconds) <= ChordWindowSeconds &&
-                                !_lanePressed[sn.Lane])
-                            {
-                                allPressed = false;
-                                break;
-                            }
+                            if (sn.Consumed || sn.Missed || sn.Type != NoteType.HoldStart) continue;
+                            ActivateHold(sn);
                         }
 
-                        if (allPressed)
-                        {
-                            for (var si = 0; si < _notes.Count; si++)
-                            {
-                                var sn = _notes[si];
-                                if (!sn.Consumed && !sn.Missed &&
-                                    sn.Type == NoteType.HoldStart &&
-                                    Math.Abs(sn.TimeSeconds - note.TimeSeconds) <= ChordWindowSeconds)
-                                    ActivateHold(sn);
-                            }
-                            RegisterJudgment(HitJudgment.Perfect);
-                        }
+                        RegisterJudgment(HitJudgment.Perfect);
                     }
 
                     continue;
                 }
             }
 
-            // Handle hold-end notes for active holds
             if (note.Type == NoteType.HoldEnd)
             {
                 if (_laneHoldActive[note.Lane])
@@ -453,62 +461,41 @@ public sealed class RhythmGameEngine
                         RegisterJudgment(judgment);
                     }
                 }
-                else
+                else if (delta > badWindow)
                 {
-                    if (delta > badWindow)
-                    {
-                        note.Consumed = true;
-                        note.Missed = true;
-                    }
+                    note.Consumed = true;
+                    note.Missed = true;
                 }
 
                 continue;
             }
 
-            // Auto-miss: tap/hold-start note has passed the bad window
             if (delta > badWindow && (note.Type == NoteType.Tap || note.Type == NoteType.HoldStart))
             {
-                // Count chord members first to register only one miss per chord
-                var firstInChord = true;
-                for (var si = 0; si < ni; si++)
+                var chordEndIndex = GetChordWindowEndIndex(ni, note.TimeSeconds);
+                var missedAny = false;
+
+                for (var si = ni; si < chordEndIndex; si++)
                 {
                     var sn = _notes[si];
-                    if ((sn.Consumed || sn.Missed) &&
-                        (sn.Type == NoteType.Tap || sn.Type == NoteType.HoldStart) &&
-                        Math.Abs(sn.TimeSeconds - note.TimeSeconds) <= ChordWindowSeconds)
-                    {
-                        firstInChord = false;
-                        break;
-                    }
+                    if (sn.Consumed || sn.Missed) continue;
+                    if (sn.Type != NoteType.Tap && sn.Type != NoteType.HoldStart) continue;
+
+                    sn.Consumed = true;
+                    sn.Missed = true;
+                    if (sn.Type == NoteType.HoldStart)
+                        _laneHoldActive[sn.Lane] = false;
+
+                    missedAny = true;
                 }
 
-                note.Consumed = true;
-                note.Missed = true;
-
-                if (note.Type == NoteType.HoldStart)
-                    _laneHoldActive[note.Lane] = false;
-
-                // Mark all chord siblings in the same pass
-                for (var si = ni + 1; si < _notes.Count; si++)
-                {
-                    var sn = _notes[si];
-                    if (!sn.Consumed && !sn.Missed &&
-                        (sn.Type == NoteType.Tap || sn.Type == NoteType.HoldStart) &&
-                        Math.Abs(sn.TimeSeconds - note.TimeSeconds) <= ChordWindowSeconds)
-                    {
-                        sn.Consumed = true;
-                        sn.Missed = true;
-                        if (sn.Type == NoteType.HoldStart)
-                            _laneHoldActive[sn.Lane] = false;
-                    }
-                }
-
-                if (firstInChord)
+                if (missedAny)
                     RegisterJudgment(HitJudgment.Miss);
             }
         }
 
-        // --- Hold tick evaluation ---
+        AdvanceGlobalNoteIndex();
+
         for (var ti = 0; ti < _holdTicks.Count; ti++)
         {
             var tick = _holdTicks[ti];
@@ -522,7 +509,6 @@ public sealed class RhythmGameEngine
             RegisterJudgment(isHoldingCorrectly ? HitJudgment.Perfect : HitJudgment.Miss);
         }
 
-        // Check if game should end — avoid LINQ on every frame
         if (elapsedSeconds >= SongDurationSeconds)
         {
             var allConsumed = true;
@@ -543,9 +529,11 @@ public sealed class RhythmGameEngine
             }
         }
 
-        CurrentBpm = Song is null ? 120d : GetBpmAt(
-            SecondsToBeatApprox(elapsedSeconds, Song.BpmChanges),
-            Song.BpmChanges);
+        CurrentBpm = _sortedBpmChanges.Count == 0
+            ? 120d
+            : GetBpmAt(
+                SecondsToBeatApprox(elapsedSeconds, _sortedBpmChanges),
+                _sortedBpmChanges);
     }
 
     public void HandleLaneHit(int lane)
@@ -597,6 +585,7 @@ public sealed class RhythmGameEngine
                 }
 
                 RegisterJudgment(worstJudgment);
+                foreach (var n in pendingChord.Notes) _pendingChordNoteSet.Remove(n);
                 _pendingChords.Remove(pendingChord);
             }
 
@@ -681,6 +670,7 @@ public sealed class RhythmGameEngine
             chord.PressedLanes.Add(lane);
             _laneFlashTimes[lane] = CurrentTimeSeconds;
             _pendingChords.Add(chord);
+            foreach (var n in chord.Notes) _pendingChordNoteSet.Add(n);
         }
     }
 
@@ -828,6 +818,9 @@ public sealed class RhythmGameEngine
             tick.Scored = false;
 
         _pendingChords.Clear();
+        _pendingChordNoteSet.Clear();
+
+        _globalNoteIndex = 0;
 
         for (var lane = 0; lane < _laneFlashTimes.Length; lane++)
         {
@@ -856,8 +849,9 @@ public sealed class RhythmGameEngine
         var currentBpm = bpmChanges[0].Bpm;
         var lastBeat = 0d;
 
-        foreach (var change in bpmChanges.OrderBy(c => c.Beat))
+        for (var i = 0; i < bpmChanges.Count; i++)
         {
+            var change = bpmChanges[i];
             var segmentBeats = change.Beat - lastBeat;
             var segmentSeconds = segmentBeats / currentBpm * 60d;
             if (elapsed + segmentSeconds >= seconds) break;

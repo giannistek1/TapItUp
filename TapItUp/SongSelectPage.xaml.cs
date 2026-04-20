@@ -130,7 +130,7 @@ public partial class SongSelectPage : ContentPage
     /// <summary>
     /// Audio offset in milliseconds. Positive values delay the arrows relative to the audio
     /// (use when audio arrives late, e.g. Bluetooth). Negative values advance the arrows.
-    /// Clamped from -0 to 4000 ms.
+    /// Clamped from -0 to 2000 ms.
     /// </summary>
     private int _audioOffsetMs;
     public int AudioOffsetMs

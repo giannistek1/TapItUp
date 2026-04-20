@@ -86,7 +86,7 @@
                    HorizontalOptions="Center"
                    VerticalOptions="Center"
                    HorizontalTextAlignment="Center"
-                   Margin="0,-120,0,0"
+                   Margin="0,-100,0,0"
                    IsVisible="False"
                    Opacity="0.9"
                    Shadow="{Shadow Brush=Black, Offset='2,2', Radius=8, Opacity=0.8}" />
