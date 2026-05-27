@@ -113,6 +113,8 @@ public partial class SongSelectPage : ContentPage
     private const string AnimationsEnabledKey = "AnimationsEnabled";
     private const string AudioOffsetMsKey = "AudioOffsetMs";
     private const string IsSettingsVisibleKey = "IsSettingsVisible";
+    private const string SongSourceTypeKey = "SongSourceType";   // "embedded" | "url" | "folder"
+    private const string SongSourceValueKey = "SongSourceValue"; // the URL or folder path
 
     private bool _animationsEnabled;
     public bool AnimationsEnabled
@@ -236,44 +238,197 @@ public partial class SongSelectPage : ContentPage
     {
         base.OnAppearing();
         if (SongList.Count == 0 && _allSongsGlobal.Count == 0)
-            _ = LoadEmbeddedSongsAsync();
+            _ = InitializeSongSourceAsync();
+    }
+
+    private async Task InitializeSongSourceAsync()
+    {
+        await Task.Delay(100); // allow UI to fully attach
+
+        var sourceType = Preferences.Default.Get(SongSourceTypeKey, string.Empty);
+
+        // First run — ask the user how they want to load songs
+        if (string.IsNullOrEmpty(sourceType))
+        {
+            sourceType = await PromptSongSourceAsync();
+            if (string.IsNullOrEmpty(sourceType)) return;
+        }
+
+        await LoadFromSourceAsync(sourceType, Preferences.Default.Get(SongSourceValueKey, string.Empty));
+    }
+
+    /// <summary>
+    /// Shows the source selection dialog and persists the user's choice.
+    /// Returns the chosen source type, or empty string if cancelled.
+    /// </summary>
+    private async Task<string> PromptSongSourceAsync()
+    {
+        var choice = await DisplayActionSheet(
+            "Where are your songs?",
+            "Cancel",
+            null,
+            "Load from URL (CDN)",
+            "Load from device folder");
+
+        switch (choice)
+        {
+            case "Load from URL (CDN)":
+                var url = await DisplayPromptAsync(
+                    "CDN URL",
+                    "Enter your songs CDN base URL:",
+                    initialValue: "https://pub-fac3ff2c2b384776b2761efc75069033.r2.dev");
+
+                if (string.IsNullOrWhiteSpace(url)) return string.Empty;
+
+                url = url.TrimEnd('/');
+                Preferences.Default.Set(SongSourceTypeKey, "url");
+                Preferences.Default.Set(SongSourceValueKey, url);
+                return "url";
+
+            case "Load from device folder":
+                Preferences.Default.Set(SongSourceTypeKey, "folder");
+                Preferences.Default.Remove(SongSourceValueKey);
+                return "folder";
+
+            default:
+                return string.Empty;
+        }
+    }
+
+    private async Task LoadFromSourceAsync(string sourceType, string sourceValue)
+    {
+        try
+        {
+            switch (sourceType)
+            {
+                case "url":
+                    if (string.IsNullOrWhiteSpace(sourceValue))
+                    {
+                        Preferences.Default.Remove(SongSourceTypeKey);
+                        _ = InitializeSongSourceAsync();
+                        return;
+                    }
+                    await LoadFromUrlAsync(sourceValue);
+                    break;
+
+                case "folder":
+                    await LoadFromSavedFolderOrPickAsync();
+                    break;
+
+                default:
+                    Preferences.Default.Remove(SongSourceTypeKey);
+                    _ = InitializeSongSourceAsync();
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[SongSelect] LoadFromSourceAsync failed: {ex.GetType().Name}: {ex.Message}");
+            await DisplayAlert("Error", $"Failed to load songs:\n\n{ex.Message}", "OK");
+        }
     }
 
     private async Task LoadEmbeddedSongsAsync()
     {
-        await Task.Delay(100); // allow UI to fully attach
-
         try
         {
-            var loadedCount = 0;
+            var songsBySeries = await RemoteSongService.LoadEmbeddedIndexAsync();
 
-            foreach (var songPath in GameConstants.Songs)
+            if (songsBySeries.Count == 0)
             {
-                try
-                {
-                    await using var stream = await FileSystem.OpenAppPackageFileAsync(songPath);
-                    using var reader = new StreamReader(stream);
-                    var content = await reader.ReadToEndAsync();
-
-                    var song = SscParser.Parse(content, songPath);
-                    if (song.Charts?.Count > 0)
-                    {
-                        AddSongToSeries(song, GetGameSeries(songPath), bannerPath: null);
-                        loadedCount++;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[SongSelect] Failed to load embedded song {songPath}: {ex.Message}");
-                }
+                System.Diagnostics.Debug.WriteLine("[SongSelect] LoadEmbeddedIndexAsync returned 0 series.");
+                return;
             }
 
-            //if (loadedCount == 0)
-            //    await DisplayAlert("No Songs", "No embedded songs could be loaded.", "OK");
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                foreach (var (seriesName, songs) in songsBySeries)
+                    foreach (var song in songs)
+                        AddSongToSeries(song, seriesName, bannerPath: null);
+            });
+
+            System.Diagnostics.Debug.WriteLine($"[SongSelect] Loaded {_allSongsGlobal.Count} songs across {GameSeriesList.Count} series.");
         }
         catch (Exception ex)
         {
-            await DisplayAlert("Error", $"Failed to load embedded songs: {ex.Message}", "OK");
+            System.Diagnostics.Debug.WriteLine($"[SongSelect] LoadEmbeddedSongsAsync failed: {ex.GetType().Name}: {ex.Message}");
+            await DisplayAlert("Error", $"Failed to load embedded songs:\n\n{ex.GetType().Name}: {ex.Message}", "OK");
+        }
+    }
+
+    private async Task LoadFromUrlAsync(string url)
+    {
+        SetLoadingVisible(true);
+        try
+        {
+            var progress = new Progress<LoadProgress>(p => MainThread.BeginInvokeOnMainThread(() =>
+            {
+                var text = $"{p.Message} ({p.Current}/{p.Total})";
+                LoadingLabelPortrait.Text = text;
+                LoadingProgressBarPortrait.Progress = p.Percentage;
+                LoadingLabelLandscape.Text = text;
+                LoadingProgressBarLandscape.Progress = p.Percentage;
+            }));
+
+            var songs = await RemoteSongService.LoadSongsAsync(url, progress);
+
+            // AddSongToSeries modifies ObservableCollections — must run on the main thread on Android
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                foreach (var song in songs)
+                {
+                    var series = RemoteSongService.GetSeriesName(song.SourcePath ?? string.Empty);
+                    AddSongToSeries(song, series, bannerPath: null);
+                }
+            });
+        }
+        finally
+        {
+            SetLoadingVisible(false);
+        }
+    }
+
+    private async Task LoadFromSavedFolderOrPickAsync()
+    {
+        var savedFolder = Preferences.Default.Get(SongSourceValueKey, string.Empty);
+
+        // If we have a saved path and it still exists, use it directly
+        if (!string.IsNullOrWhiteSpace(savedFolder))
+        {
+#if ANDROID
+            await LoadSongsFromSafAsync(savedFolder);
+#else
+            if (Directory.Exists(savedFolder))
+            {
+                await LoadSongsFromFileSystemAsync(savedFolder);
+                return;
+            }
+#endif
+        }
+
+        // Otherwise open the folder picker and save the result
+        try
+        {
+            var result = await FolderPicker.Default.PickAsync(CancellationToken.None);
+            if (result == null || !result.IsSuccessful) return;
+
+            var folderPath = result.Folder.Path;
+            if (string.IsNullOrWhiteSpace(folderPath)) return;
+
+            Preferences.Default.Set(SongSourceValueKey, folderPath);
+
+#if ANDROID
+            var safUri = folderPath.StartsWith("content://", StringComparison.OrdinalIgnoreCase)
+                ? folderPath
+                : ConvertPathToSafUri(folderPath);
+            await LoadSongsFromSafAsync(safUri);
+#else
+            await LoadSongsFromFileSystemAsync(folderPath);
+#endif
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlert("Error", $"Failed to open folder picker: {ex.Message}", "OK");
         }
     }
 
@@ -345,12 +500,10 @@ public partial class SongSelectPage : ContentPage
     {
         var context = Android.App.Application.Context;
         var loadedCount = 0;
-        var errorCount = 0;
 
-        // Show loading UI immediately before scanning
         SetLoadingVisible(true);
-        LoadingLabelPortrait.Text = "Scanning folder... This may take a minute.";
-        LoadingLabelLandscape.Text = "Scanning folder... This may take a minute.";
+        LoadingLabelPortrait.Text = "Scanning folder...";
+        LoadingLabelLandscape.Text = "Scanning folder...";
 
         List<TapItUp.Platforms.Android.ScanResult> scanResults;
         try
@@ -374,38 +527,28 @@ public partial class SongSelectPage : ContentPage
             return;
         }
 
-        var progress = new Progress<LoadProgress>(p => MainThread.BeginInvokeOnMainThread(() =>
+        await MainThread.InvokeOnMainThreadAsync(() =>
         {
-            var text = $"{p.Message} ({p.Current}/{p.Total})";
-            LoadingLabelPortrait.Text = text;
-            LoadingProgressBarPortrait.Progress = p.Percentage;
-            LoadingLabelLandscape.Text = text;
-            LoadingProgressBarLandscape.Progress = p.Percentage;
-        }));
-
-        var i = 0;
-        foreach (var result in scanResults)
-        {
-            try
+            foreach (var result in scanResults)
             {
-                i++;
-                var songName = Path.GetFileNameWithoutExtension(result.SscUri);
+                // Use SongName from the scanner — content:// URIs can't be path-parsed
+                var title = result.SongName;
+                var dashIdx = title.IndexOf(" - ", StringComparison.Ordinal);
+                if (dashIdx >= 0) title = title[(dashIdx + 3)..].Trim();
 
-                // Decode URL-encoded characters (e.g., %20 -> space)
-                songName = Uri.UnescapeDataString(songName);
-
-                ((IProgress<LoadProgress>)progress).Report(new LoadProgress
+                var song = new SscSong
                 {
-                    Message = $"Loading {songName}...",
-                    Current = i,
-                    Total = scanResults.Count
-                });
-
-                var content = await TapItUp.Platforms.Android.AndroidSafScanner.ReadTextAsync(context, result.SscUri);
-                var song = SscParser.Parse(content, result.SscUri);
+                    Title = title,
+                    Artist = string.Empty,
+                    SourcePath = result.SscUri,
+                    MusicPath = string.Empty,
+                    BackgroundPath = string.Empty,
+                    BpmChanges = [],
+                    TickCounts = [],
+                    SpeedChanges = [],
+                    Charts = []
+                };
                 song.SongDocumentUri = result.SongDocumentUri;
-
-                if (song.Charts.Count == 0) continue;
 
                 ImageSource? bannerOverride = null;
                 if (!string.IsNullOrEmpty(result.BannerUri))
@@ -418,89 +561,74 @@ public partial class SongSelectPage : ContentPage
                 AddSongToSeries(song, result.SeriesName, bannerPath: null, bannerImageOverride: bannerOverride);
                 loadedCount++;
             }
-            catch (Exception ex)
-            {
-                errorCount++;
-                System.Diagnostics.Debug.WriteLine($"[SongSelect] SAF load failed for {result.SscUri}: {ex.Message}");
-            }
-        }
+        });
 
         SetLoadingVisible(false);
-
-        var message = loadedCount == 0
-            ? "No songs with valid charts were found.\n\nExpected structure:\n  Root / Game Series / Song / song.ssc"
-            : $"Loaded {loadedCount} song(s) across {_songsBySeries.Count} series.";
-
-        if (errorCount > 0)
-            message += $"\n({errorCount} file(s) failed to parse.)";
-
-        await DisplayAlert(loadedCount == 0 ? "No Songs Found" : "Songs Loaded", message, "OK");
+        System.Diagnostics.Debug.WriteLine($"[SongSelect] Indexed {loadedCount} songs from SAF folder.");
     }
 #endif
 
-    private async Task LoadSongsFromFileSystemAsync(string rootPath)
+    private Task LoadSongsFromFileSystemAsync(string rootPath)
     {
         var loadedCount = 0;
-        var errorCount = 0;
+        var seriesNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
             if (!Directory.Exists(rootPath))
             {
-                await DisplayAlert("Folder Not Found", $"The path could not be accessed:\n{rootPath}", "OK");
-                return;
+                _ = DisplayAlert("Folder Not Found", $"The path could not be accessed:\n{rootPath}", "OK");
+                return Task.CompletedTask;
             }
 
             foreach (var seriesDir in Directory.GetDirectories(rootPath))
             {
-                var seriesName = Path.GetFileName(seriesDir).ToUpperInvariant();
-
                 foreach (var songDir in Directory.GetDirectories(seriesDir))
                 {
                     var sscFiles = Directory.GetFiles(songDir, "*.ssc");
                     if (sscFiles.Length == 0) continue;
 
-                    try
-                    {
-                        var content = await File.ReadAllTextAsync(sscFiles[0]);
-                        var song = SscParser.Parse(content, sscFiles[0]);
-                        if (song.Charts.Count == 0) continue;
+                    var sscPath = sscFiles[0];
+                    var seriesName = RemoteSongService.GetSeriesName(sscPath);
+                    seriesNames.Add(seriesName);
 
-                        var bannerPath = new[] {
-                            Path.Combine(seriesDir, "banner.png"),
-                            Path.Combine(seriesDir, "banner.jpg"),
-                        }.FirstOrDefault(File.Exists);
-
-                        AddSongToSeries(song, seriesName, bannerPath);
-                        loadedCount++;
-                    }
-                    catch (Exception ex)
+                    var song = new SscSong
                     {
-                        errorCount++;
-                        System.Diagnostics.Debug.WriteLine($"[SongSelect] Failed to load {sscFiles[0]}: {ex.Message}");
-                    }
+                        Title = RemoteSongService.GetSongTitleFromPath(sscPath),
+                        Artist = string.Empty,
+                        SourcePath = sscPath,
+                        MusicPath = string.Empty,
+                        BackgroundPath = string.Empty,
+                        BpmChanges = [],
+                        TickCounts = [],
+                        SpeedChanges = [],
+                        Charts = []
+                    };
+
+                    var bannerPath = new[] {
+                        Path.Combine(seriesDir, "banner.png"),
+                        Path.Combine(seriesDir, "banner.jpg"),
+                    }.FirstOrDefault(File.Exists);
+
+                    // Must be on main thread for ObservableCollection on Android
+                    MainThread.BeginInvokeOnMainThread(() => AddSongToSeries(song, seriesName, bannerPath));
+                    loadedCount++;
                 }
             }
         }
         catch (UnauthorizedAccessException)
         {
-            await DisplayAlert("Permission Denied", $"Cannot read:\n{rootPath}", "OK");
-            return;
+            _ = DisplayAlert("Permission Denied", $"Cannot read:\n{rootPath}", "OK");
+            return Task.CompletedTask;
         }
         catch (Exception ex)
         {
-            await DisplayAlert("Error", $"Failed to scan folder: {ex.Message}", "OK");
-            return;
+            _ = DisplayAlert("Error", $"Failed to scan folder: {ex.Message}", "OK");
+            return Task.CompletedTask;
         }
 
-        var message = loadedCount == 0
-            ? "No songs with valid charts were found.\n\nExpected structure:\n  Root / Game Series / Song / song.ssc"
-            : $"Loaded {loadedCount} song(s) across {_songsBySeries.Count} series.";
-
-        if (errorCount > 0)
-            message += $"\n({errorCount} file(s) failed to parse.)";
-
-        await DisplayAlert(loadedCount == 0 ? "No Songs Found" : "Songs Loaded", message, "OK");
+        System.Diagnostics.Debug.WriteLine($"[SongSelect] Indexed {loadedCount} songs across {seriesNames.Count} series from folder.");
+        return Task.CompletedTask;
     }
 
     // -------------------------------------------------------------------------
@@ -539,9 +667,9 @@ public partial class SongSelectPage : ContentPage
 
             var songs = await RemoteSongService.LoadSongsAsync(url, progress);
 
-            foreach (var song in songs.Where(s => s.Charts.Count > 0))
+            foreach (var song in songs)
             {
-                var series = GetGameSeriesFromUrl(song.SourcePath ?? string.Empty);
+                var series = RemoteSongService.GetSeriesName(song.SourcePath ?? string.Empty);
                 AddSongToSeries(song, series, bannerPath: null);
             }
 
@@ -597,7 +725,6 @@ public partial class SongSelectPage : ContentPage
             }
             else if (bannerImage == null)
             {
-                // Try loading an embedded banner from the app package
                 var cleanSeriesName = GetCleanSeriesNameForBanner(seriesName);
                 var embeddedBannerPath = $"banner_{cleanSeriesName}.png";
                 try
@@ -747,7 +874,7 @@ public partial class SongSelectPage : ContentPage
         IsSeriesSelectionVisible = true;
     }
 
-    private void OnSongSelected(object sender, SelectionChangedEventArgs e)
+    private async void OnSongSelected(object sender, SelectionChangedEventArgs e)
     {
         var selectedItem = e.CurrentSelection.FirstOrDefault() as SongListItem;
 
@@ -783,6 +910,37 @@ public partial class SongSelectPage : ContentPage
             return;
         }
 
+        // Lazy-load charts if this song was only header-parsed
+        if (selectedItem.Song.Charts.Count == 0 && !string.IsNullOrWhiteSpace(selectedItem.Song.SourcePath))
+        {
+            try
+            {
+                var content = await ReadSscContentAsync(selectedItem.Song);
+                if (content != null)
+                {
+                    var fullSong = SscParser.Parse(content, selectedItem.Song.SourcePath);
+                    fullSong.BaseUrl = selectedItem.Song.BaseUrl;
+                    fullSong.SongDocumentUri = selectedItem.Song.SongDocumentUri;
+
+                    // Swap the shell song for the fully parsed one in the series dictionary
+                    var seriesName = GetGameSeries(selectedItem.Song.SourcePath);
+                    if (_songsBySeries.TryGetValue(seriesName, out var seriesList))
+                    {
+                        var idx = seriesList.IndexOf(selectedItem.Song);
+                        if (idx >= 0) seriesList[idx] = fullSong;
+                    }
+
+                    selectedItem.Song = fullSong;
+                    selectedItem.Artist = fullSong.Artist;
+                    selectedItem.ChartSummary = GenerateChartSummary(fullSong);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[SongSelect] Lazy chart load failed for {selectedItem.Song.Title}: {ex.Message}");
+            }
+        }
+
         _selectedSong = selectedItem.Song;
         HasSelection = true;
 
@@ -807,6 +965,38 @@ public partial class SongSelectPage : ContentPage
         }
 
         PopulateCharts(_selectedSong);
+    }
+
+    /// <summary>
+    /// Reads the raw .ssc content from whichever source the song came from:
+    /// embedded app package, CDN/HTTP, local filesystem, or Android SAF.
+    /// </summary>
+    private static async Task<string?> ReadSscContentAsync(SscSong song)
+    {
+        var sourcePath = song.SourcePath!;
+
+#if ANDROID
+        // Android SAF content:// URI — must be handled before the HTTP check
+        // because content:// passes Uri.IsWellFormedUriString as absolute
+        if (sourcePath.StartsWith("content://", StringComparison.OrdinalIgnoreCase))
+            return await TapItUp.Platforms.Android.AndroidSafScanner.ReadTextAsync(
+                Android.App.Application.Context, sourcePath);
+#endif
+
+        // Remote CDN / HTTP(S)
+        if (Uri.IsWellFormedUriString(sourcePath, UriKind.Absolute))
+            return await RemoteSongService.HttpClient.GetStringAsync(sourcePath);
+
+        // Embedded app-package asset (relative path, not rooted)
+        if (!Path.IsPathRooted(sourcePath))
+        {
+            await using var stream = await FileSystem.OpenAppPackageFileAsync(sourcePath);
+            using var reader = new StreamReader(stream);
+            return await reader.ReadToEndAsync();
+        }
+
+        // Plain filesystem (Windows / Mac / iOS)
+        return await File.ReadAllTextAsync(sourcePath);
     }
 
     private void OnCloseSelectionClicked(object sender, EventArgs e)
@@ -970,7 +1160,8 @@ public partial class SongSelectPage : ContentPage
 
     private static string GenerateChartSummary(SscSong song)
     {
-        if (song.Charts.Count == 0) return "No charts available";
+        // Song is a path-only shell — charts not loaded yet
+        if (song.Charts.Count == 0) return "Select to load charts";
 
         var parts = new List<string>();
 
@@ -1014,12 +1205,29 @@ public partial class SongSelectPage : ContentPage
         AudioOffsetMs = (int)Math.Round(e.NewValue);
 }
 
-public class SongListItem
+public class SongListItem : INotifyPropertyChanged
 {
+    public event PropertyChangedEventHandler? PropertyChanged;
+    private void OnPropertyChanged([CallerMemberName] string? name = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
     public required SscSong Song { get; set; }
     public required string Title { get; set; }
-    public required string Artist { get; set; }
-    public required string ChartSummary { get; set; }
+
+    private string _artist = string.Empty;
+    public required string Artist
+    {
+        get => _artist;
+        set { if (_artist == value) return; _artist = value; OnPropertyChanged(); }
+    }
+
+    private string _chartSummary = string.Empty;
+    public required string ChartSummary
+    {
+        get => _chartSummary;
+        set { if (_chartSummary == value) return; _chartSummary = value; OnPropertyChanged(); }
+    }
+
     public ImageSource? BackgroundImageSource { get; set; }
 }
 

@@ -40,6 +40,34 @@ public static class SscParser
         };
     }
 
+    /// <summary>
+    /// Parses only the global header tags (#TITLE, #ARTIST, #MUSIC, #BANNER, etc.)
+    /// without parsing any chart or note data. Fast — suitable for startup/song list.
+    /// Full charts are loaded lazily via <see cref="Parse"/> when actually needed.
+    /// </summary>
+    public static SscSong ParseHeaderOnly(string content, string? sourcePath = null)
+    {
+        var parser = new PegParser(content);
+        var globalTags = parser.ParseGlobalTags();
+        var bpmChanges = ParseBpmString(globalTags.Get("BPMS"));
+        var tickCounts = ParseTickCountString(globalTags.Get("TICKCOUNTS"));
+        var speedChanges = ParseSpeedString(globalTags.Get("SPEEDS"));
+
+        return new SscSong
+        {
+            Title = globalTags.Get("TITLE", "Unknown Title"),
+            Artist = globalTags.Get("ARTIST", "Unknown Artist"),
+            OffsetSeconds = globalTags.GetDouble("OFFSET", 0),
+            BpmChanges = bpmChanges,
+            TickCounts = tickCounts,
+            SpeedChanges = speedChanges,
+            Charts = [],   // intentionally empty — populated lazily on selection
+            SourcePath = sourcePath,
+            MusicPath = globalTags.Get("MUSIC", globalTags.Get("SONG", "")),
+            BackgroundPath = globalTags.Get("BANNER", globalTags.Get("BACKGROUND", ""))
+        };
+    }
+
     // ---------- PEG-style parser (small recursive-descent / token-driven scanner) ----------
     private sealed class PegParser
     {

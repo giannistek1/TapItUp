@@ -74,6 +74,7 @@ public static class AndroidSafScanner
                 results.Add(new ScanResult
                 {
                     SeriesName = series.Name.ToUpperInvariant(),
+                    SongName = song.Name,
                     SscUri = sscUri,
                     SongDocumentUri = songDirUri,
                     BannerUri = bannerUri,
@@ -154,6 +155,7 @@ public static class AndroidSafScanner
 public sealed class ScanResult
 {
     public required string SeriesName { get; init; }
+    public required string SongName { get; init; }   // display name of the song folder
     public required string SscUri { get; init; }
     public required string SongDocumentUri { get; init; }
     public string? BannerUri { get; init; }
