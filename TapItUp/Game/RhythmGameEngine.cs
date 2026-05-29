@@ -1,125 +1,136 @@
 ﻿namespace TapItUp.Game;
 
 /// <summary>
-/// Represents a group of notes that all fall within <see cref="RhythmGameEngine.ChordWindowSeconds"/>
+/// Represents a group of notes that fall within <see cref="RhythmGameEngine.ChordWindowSeconds"/>
 /// of each other and must all be pressed to count as a single hit.
 /// </summary>
 internal sealed class PendingChord
 {
-    /// <summary>All notes that belong to this chord.</summary>
     public List<PlayableNote> Notes { get; } = [];
-
-    /// <summary>The earliest note time in the chord — used as the reference for judgement timing.</summary>
-    public double ReferenceTimeSeconds => Notes.Min(n => n.TimeSeconds);
-
-    /// <summary>Lanes that have been pressed since this chord became active.</summary>
     public HashSet<int> PressedLanes { get; } = [];
 
-    /// <summary>Whether all lanes in the chord have been pressed.</summary>
+    /// <summary>The earliest note time in the chord — used as the timing reference.</summary>
+    public double ReferenceTimeSeconds => Notes.Min(n => n.TimeSeconds);
+
+    /// <summary>True when every lane in the chord has been pressed.</summary>
     public bool IsComplete => Notes.All(n => PressedLanes.Contains(n.Lane));
 
-    /// <summary>Returns true when <paramref name="currentTime"/> has passed the bad window.</summary>
+    /// <summary>True when <paramref name="currentTime"/> has passed the bad window.</summary>
     public bool IsExpired(double currentTime, double badWindow)
         => currentTime - ReferenceTimeSeconds > badWindow;
 }
 
 public sealed class RhythmGameEngine
 {
-    private readonly Dictionary<HitJudgment, int> _counts = Enum
-        .GetValues<HitJudgment>()
-        .ToDictionary(judgment => judgment, _ => 0);
+    // ── Timing constants ──────────────────────────────────────────────────────
 
-    // 10 lanes to support pump-double (lanes 0-4 = left pad, lanes 5-9 = right pad)
-    private readonly double[] _laneFlashTimes = [-10d, -10d, -10d, -10d, -10d, -10d, -10d, -10d, -10d, -10d];
-    private readonly bool[] _laneHoldActive = [false, false, false, false, false, false, false, false, false, false];
-    private readonly bool[] _lanePressed = [false, false, false, false, false, false, false, false, false, false];
+    /// <summary>Notes within this window are grouped into a single chord.</summary>
+    private const double ChordWindowSeconds = 0.020d;
 
-    // Tracks the most recent judgment on each lane for per-lane visual feedback.
-    private readonly HitJudgment[] _laneLastJudgment =
-    [
-        HitJudgment.Miss, HitJudgment.Miss, HitJudgment.Miss, HitJudgment.Miss, HitJudgment.Miss,
-        HitJudgment.Miss, HitJudgment.Miss, HitJudgment.Miss, HitJudgment.Miss, HitJudgment.Miss
-    ];
+    /// <summary>How early a button can be pre-held before a HoldStart note arrives.</summary>
+    private const double PreHoldAcceptanceSeconds = 0.05d;
+
+    /// <summary>Scoring window for hold ticks.</summary>
+    private const double TickWindowSeconds = 0.075d;
+
+    /// <summary>Total lane count — 5 for single, 10 for double.</summary>
+    private const int MaxLanes = 10;
+
+    // ── Per-lane state ────────────────────────────────────────────────────────
+
+    private readonly double[] _laneFlashTimes = Enumerable.Repeat(-10d, MaxLanes).ToArray();
+    private readonly bool[] _laneHoldActive = new bool[MaxLanes];
+    private readonly bool[] _lanePressed = new bool[MaxLanes];
+    private readonly HitJudgment[] _laneLastJudgment = Enumerable.Repeat(HitJudgment.Miss, MaxLanes).ToArray();
+
+    // Per-lane sorted note lists with head indices for O(1) candidate lookup.
+    private readonly List<PlayableNote>[] _laneNotes = Enumerable
+        .Range(0, MaxLanes)
+        .Select(_ => new List<PlayableNote>(64))
+        .ToArray();
+    private readonly int[] _laneNoteIndex = new int[MaxLanes];
+
+    // ── Note and tick state ───────────────────────────────────────────────────
 
     private List<PlayableNote> _notes = [];
     private List<HoldTick> _holdTicks = [];
+    private int _globalNoteIndex;
+    private int _chordGroupCount;
+
+    // ── Chord tracking ────────────────────────────────────────────────────────
 
     private readonly List<PendingChord> _pendingChords = [];
+    private readonly HashSet<PlayableNote> _pendingChordNoteSet = [];
 
-    private const double PreHoldAcceptanceSeconds = 0.05d;
-    private const double TickWindowSeconds = 0.075d;
+    // ── Scoring ───────────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Notes whose times fall within this window are treated as one simultaneous chord.
-    /// ALL lanes in the chord must be pressed; pressing only some is a miss.
-    /// </summary>
-    private const double ChordWindowSeconds = 0.020d;
+    private readonly Dictionary<HitJudgment, int> _counts = Enum
+        .GetValues<HitJudgment>()
+        .ToDictionary(j => j, _ => 0);
 
-    // ── Per-lane sorted note lists ────────────────────────────────────────────
-    // Populated at Load() time. Each sub-list contains only Tap/HoldStart notes
-    // for that lane, sorted by TimeSeconds. _laneNoteIndex[lane] is the index of
-    // the first note that has not yet been consumed or missed, allowing O(1)
-    // candidate lookup on every button press instead of a full O(n) scan.
-    private const int MaxLanes = 10;
-    private readonly List<PlayableNote>[] _laneNotes = new List<PlayableNote>[MaxLanes];
-    private readonly int[] _laneNoteIndex = new int[MaxLanes];
-    private int _globalNoteIndex;
+    private double _weightedSum;
+    private bool _scoreDirty;
+    private int _cachedScore;
+    private string _cachedGrade = "D";
+    private string _cachedPlate = string.Empty;
 
-    private readonly HashSet<PlayableNote> _pendingChordNoteSet = new();
+    // ── BPM ───────────────────────────────────────────────────────────────────
 
     private List<BpmChange> _sortedBpmChanges = [];
 
+    // ── Public properties ─────────────────────────────────────────────────────
+
     public SscSong? Song { get; private set; }
     public SscChart? Chart { get; private set; }
+
     public IReadOnlyList<PlayableNote> Notes => _notes;
     public IReadOnlyList<HoldTick> HoldTicks => _holdTicks;
     public IReadOnlyDictionary<HitJudgment, int> Counts => _counts;
+
     public double CurrentTimeSeconds { get; private set; }
     public bool IsPlaying { get; private set; }
     public int Combo { get; private set; }
     public int MaxCombo { get; private set; }
     public int MissCombo { get; private set; }
-    public string LastJudgmentText { get; private set; } = "READY";
-    /// <summary>
-    /// Incremented on every call to <see cref="RegisterJudgment"/>.
-    /// The UI compares this to detect new hits even when the judgment text is identical.
-    /// </summary>
-    public int JudgmentSequence { get; private set; }
-
-    public bool FullCombo => _counts[HitJudgment.Bad] == 0 && _counts[HitJudgment.Miss] == 0;
-
-    /// <summary>
-    /// True when the loaded chart is a pump-double or dance-double chart (10 lanes).
-    /// </summary>
     public bool IsDoubleChart { get; private set; }
 
-    /// <summary>
-    /// Controls which judgement-timing-window preset is used. Can be changed before or after Load().
-    /// Defaults to Standard.
-    /// </summary>
     public JudgmentDifficulty JudgmentDifficulty { get; set; } = JudgmentDifficulty.Standard;
 
-    /// <summary>Total scoreable events: chord groups + hold ticks.</summary>
-    public int TotalNoteCount => _chordGroupCount + _holdTicks.Count;
+    /// <summary>Monotonically incremented on every judgment so the UI can distinguish consecutive identical hits.</summary>
+    public int JudgmentSequence { get; private set; }
+    public string LastJudgmentText { get; private set; } = "READY";
 
-    public double AccuracyPercent => PhoenixScoring.MaxScore == 0 ? 0d : Score / (double)PhoenixScoring.MaxScore * 100d;
-    public double SongDurationSeconds => (Chart?.LastNoteTimeSeconds ?? 0d) + 2.5d;
-
-    private int _chordGroupCount;
-
-    // ── Live BPM ─────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// The BPM active at <see cref="CurrentTimeSeconds"/>.
-    /// Updated every <see cref="Update"/> call; used by the UI for beat-pulse.
-    /// </summary>
+    /// <summary>The BPM active at <see cref="CurrentTimeSeconds"/>. Updated every <see cref="Update"/> call.</summary>
     public double CurrentBpm { get; private set; } = 120d;
 
-    public RhythmGameEngine()
+    public bool FullCombo => _counts[HitJudgment.Bad] == 0 && _counts[HitJudgment.Miss] == 0;
+    public int TotalNoteCount => _chordGroupCount + _holdTicks.Count;
+    public double SongDurationSeconds => (Chart?.LastNoteTimeSeconds ?? 0d) + 2.5d;
+
+    public double AccuracyPercent =>
+        PhoenixScoring.MaxScore == 0 ? 0d : Score / (double)PhoenixScoring.MaxScore * 100d;
+
+    /// <summary>
+    /// Score from 0–1,000,000. Lazily recalculated only when a judgment has been
+    /// registered since the last read — safe to poll every frame.
+    /// </summary>
+    public int Score
     {
-        for (var i = 0; i < MaxLanes; i++)
-            _laneNotes[i] = new List<PlayableNote>(64);
+        get
+        {
+            if (!_scoreDirty) return _cachedScore;
+
+            _cachedScore = PhoenixScoring.CalculateScoreIncremental(_weightedSum, TotalNoteCount, MaxCombo);
+            _cachedGrade = PhoenixScoring.CalculateGrade(_cachedScore);
+            _cachedPlate = PhoenixScoring.CalculatePlate(_counts, TotalNoteCount);
+            _scoreDirty = false;
+            return _cachedScore;
+        }
     }
+
+    // Accessing Score populates the cached grade/plate — intentional.
+    public string Grade { get { _ = Score; return _cachedGrade; } }
+    public string Plate { get { _ = Score; return _cachedPlate; } }
 
     // -------------------------------------------------------------------------
     // Load
@@ -129,218 +140,28 @@ public sealed class RhythmGameEngine
     {
         Song = song;
         Chart = chart;
+
         IsDoubleChart =
             chart.StepType.Equals("pump-double", StringComparison.OrdinalIgnoreCase) ||
             chart.StepType.Equals("dance-double", StringComparison.OrdinalIgnoreCase);
 
-        _sortedBpmChanges = song.BpmChanges
-            .OrderBy(change => change.Beat)
-            .ToList();
+        _sortedBpmChanges = [.. song.BpmChanges.OrderBy(c => c.Beat)];
 
-        _notes = chart.Notes
-            .Select(note => new PlayableNote
+        _notes = [.. chart.Notes
+            .Select(n => new PlayableNote
             {
-                Lane = note.Lane,
-                Beat = note.Beat,
-                TimeSeconds = note.TimeSeconds,
-                Type = note.Type
+                Lane        = n.Lane,
+                Beat        = n.Beat,
+                TimeSeconds = n.TimeSeconds,
+                Type        = n.Type
             })
-            .OrderBy(note => note.TimeSeconds)
-            .ToList();
+            .OrderBy(n => n.TimeSeconds)];
 
         LinkHoldNotes();
         GenerateHoldTicks(song.TickCounts);
         ComputeChordGroupCount();
         BuildLaneIndex();
         ResetSession();
-    }
-
-    // -------------------------------------------------------------------------
-    // Per-lane index
-    // -------------------------------------------------------------------------
-
-    private void BuildLaneIndex()
-    {
-        for (var i = 0; i < MaxLanes; i++)
-            _laneNotes[i].Clear();
-
-        for (var ni = 0; ni < _notes.Count; ni++)
-        {
-            var n = _notes[ni];
-            if (n.Type == NoteType.Tap || n.Type == NoteType.HoldStart)
-                _laneNotes[n.Lane].Add(n);
-        }
-
-        // Each sub-list is already in chart order (notes were added sequentially).
-        // Sort defensively in case the source chart isn't perfectly ordered.
-        for (var i = 0; i < MaxLanes; i++)
-            _laneNotes[i].Sort(static (a, b) => a.TimeSeconds.CompareTo(b.TimeSeconds));
-    }
-
-    /// <summary>
-    /// Advances the per-lane index past any notes that are already consumed or missed.
-    /// Call before a lookup to keep the index tight.
-    /// </summary>
-    private void AdvanceLaneIndex(int lane)
-    {
-        var list = _laneNotes[lane];
-        var idx = _laneNoteIndex[lane];
-        while (idx < list.Count && (list[idx].Consumed || list[idx].Missed))
-            idx++;
-        _laneNoteIndex[lane] = idx;
-    }
-
-    private void AdvanceGlobalNoteIndex()
-    {
-        var idx = _globalNoteIndex;
-        while (idx < _notes.Count)
-        {
-            var note = _notes[idx];
-            if (note.Type == NoteType.HoldBody || note.Consumed || note.Missed)
-            {
-                idx++;
-                continue;
-            }
-
-            break;
-        }
-
-        _globalNoteIndex = idx;
-    }
-
-    private int GetChordWindowEndIndex(int startIndex, double referenceTimeSeconds)
-    {
-        var endIndex = startIndex;
-        while (endIndex < _notes.Count &&
-               _notes[endIndex].TimeSeconds - referenceTimeSeconds <= ChordWindowSeconds)
-        {
-            endIndex++;
-        }
-
-        return endIndex;
-    }
-
-    // -------------------------------------------------------------------------
-    // Chord group count
-    // -------------------------------------------------------------------------
-
-    private void ComputeChordGroupCount()
-    {
-        var scoreable = _notes
-            .Where(n => n.Type == NoteType.Tap || n.Type == NoteType.HoldStart)
-            .OrderBy(n => n.TimeSeconds)
-            .ToList();
-
-        _chordGroupCount = 0;
-        var i = 0;
-        while (i < scoreable.Count)
-        {
-            _chordGroupCount++;
-            var groupTime = scoreable[i].TimeSeconds;
-            while (i < scoreable.Count &&
-                   scoreable[i].TimeSeconds - groupTime <= ChordWindowSeconds)
-            {
-                i++;
-            }
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Hold tick generation
-    // -------------------------------------------------------------------------
-
-    private void GenerateHoldTicks(IReadOnlyList<TickCount> tickCounts)
-    {
-        _holdTicks = [];
-
-        if (_sortedBpmChanges.Count == 0) return;
-
-        foreach (var head in _notes.Where(n => n.Type == NoteType.HoldStart && n.HoldPartner != null))
-        {
-            var tail = head.HoldPartner!;
-            var headTime = head.TimeSeconds;
-            var tailTime = tail.TimeSeconds;
-
-            if (tailTime <= headTime) continue;
-
-            var currentBeat = head.Beat;
-            var currentTime = headTime;
-
-            while (currentTime < tailTime)
-            {
-                var ticksPerBeat = GetTicksPerBeat(currentBeat, tickCounts);
-                if (ticksPerBeat <= 0) break;
-
-                var bpm = GetBpmAt(currentBeat, _sortedBpmChanges);
-                if (bpm <= 0) break;
-
-                var secondsPerTick = 60.0 / bpm / ticksPerBeat;
-                if (secondsPerTick <= 0) break;
-
-                var nextTime = currentTime + secondsPerTick;
-                var nextBeat = currentBeat + 1.0 / ticksPerBeat;
-
-                if (nextTime < tailTime - 0.001)
-                    _holdTicks.Add(new HoldTick { Lane = head.Lane, TimeSeconds = nextTime });
-
-                currentTime = nextTime;
-                currentBeat = nextBeat;
-            }
-        }
-
-        _holdTicks.Sort((a, b) => a.TimeSeconds.CompareTo(b.TimeSeconds));
-    }
-
-    private static int GetTicksPerBeat(double beat, IReadOnlyList<TickCount> tickCounts)
-    {
-        var active = 4;
-        foreach (var tc in tickCounts)
-        {
-            if (tc.Beat <= beat + 0.0001) active = tc.TicksPerBeat;
-            else break;
-        }
-        return active;
-    }
-
-    private static double GetBpmAt(double beat, IReadOnlyList<BpmChange> bpmChanges)
-    {
-        var bpm = bpmChanges[0].Bpm;
-        foreach (var bc in bpmChanges)
-        {
-            if (bc.Beat <= beat + 0.0001) bpm = bc.Bpm;
-            else break;
-        }
-        return bpm;
-    }
-
-    // -------------------------------------------------------------------------
-    // Hold note linking
-    // -------------------------------------------------------------------------
-
-    private void LinkHoldNotes()
-    {
-        var notesByLane = _notes.GroupBy(n => n.Lane)
-            .ToDictionary(g => g.Key, g => g.OrderBy(n => n.TimeSeconds).ToList());
-
-        foreach (var laneNotes in notesByLane.Values)
-        {
-            for (var i = 0; i < laneNotes.Count; i++)
-            {
-                var note = laneNotes[i];
-                if (note.Type != NoteType.HoldStart) continue;
-
-                for (var j = i + 1; j < laneNotes.Count; j++)
-                {
-                    var endNote = laneNotes[j];
-                    if (endNote.Type == NoteType.HoldEnd)
-                    {
-                        note.HoldPartner = endNote;
-                        endNote.HoldPartner = note;
-                        break;
-                    }
-                }
-            }
-        }
     }
 
     // -------------------------------------------------------------------------
@@ -358,11 +179,8 @@ public sealed class RhythmGameEngine
     public void Stop()
     {
         IsPlaying = false;
-        for (var i = 0; i < _laneHoldActive.Length; i++)
-        {
-            _laneHoldActive[i] = false;
-            _lanePressed[i] = false;
-        }
+        Array.Clear(_laneHoldActive, 0, MaxLanes);
+        Array.Clear(_lanePressed, 0, MaxLanes);
     }
 
     // -------------------------------------------------------------------------
@@ -374,8 +192,20 @@ public sealed class RhythmGameEngine
         CurrentTimeSeconds = elapsedSeconds;
         if (!IsPlaying || Chart is null) return;
 
-        var badWindow = PhoenixScoring.GetBadWindow(this.JudgmentDifficulty);
+        var badWindow = PhoenixScoring.GetBadWindow(JudgmentDifficulty);
 
+        ExpireOldChords(elapsedSeconds, badWindow);
+        ProcessNotes(elapsedSeconds, badWindow);
+        ProcessHoldTicks(elapsedSeconds);
+        CheckSongEnd(elapsedSeconds);
+
+        CurrentBpm = _sortedBpmChanges.Count == 0
+            ? 120d
+            : GetBpmAt(SecondsToBeatApprox(elapsedSeconds, _sortedBpmChanges), _sortedBpmChanges);
+    }
+
+    private void ExpireOldChords(double elapsedSeconds, double badWindow)
+    {
         for (var ci = _pendingChords.Count - 1; ci >= 0; ci--)
         {
             var chord = _pendingChords[ci];
@@ -383,379 +213,302 @@ public sealed class RhythmGameEngine
 
             foreach (var n in chord.Notes)
             {
-                if (!n.Consumed)
-                {
-                    n.Consumed = true;
-                    n.Missed = true;
-                    if (n.Type == NoteType.HoldStart)
-                        _laneHoldActive[n.Lane] = false;
-                }
+                if (n.Consumed) continue;
+                n.Consumed = true;
+                n.Missed = true;
+                if (n.Type == NoteType.HoldStart) _laneHoldActive[n.Lane] = false;
             }
 
             RegisterJudgment(HitJudgment.Miss);
-            foreach (var n in _pendingChords[ci].Notes) _pendingChordNoteSet.Remove(n);
-            _pendingChords.RemoveAt(ci);
+            RemovePendingChord(chord);
+        }
+    }
+
+    /// <summary>
+    /// Auto-activates a HoldStart note when the lane is already held down and the note
+    /// falls within the pre-hold acceptance window.
+    /// </summary>
+    private bool TryAutoActivatePreHeldHold(PlayableNote note, double delta, int noteIndex, double badWindow)
+    {
+        if (note.Type != NoteType.HoldStart) return false;
+        if (_laneHoldActive[note.Lane]) return false;
+        if (!_lanePressed[note.Lane]) return false;
+        if (delta < -PreHoldAcceptanceSeconds) return false;
+        if (delta > badWindow) return false;
+
+        var chordEnd = GetChordWindowEndIndex(noteIndex, note.TimeSeconds);
+        var holdCount = CountActiveHoldStarts(noteIndex, chordEnd);
+
+        if (holdCount == 1)
+        {
+            ActivateHold(note);
+            RegisterJudgment(HitJudgment.Perfect);
+            return true;
         }
 
+        if (AllHoldsPressedInRange(noteIndex, chordEnd))
+        {
+            ActivateHoldsInRange(noteIndex, chordEnd);
+            RegisterJudgment(HitJudgment.Perfect);
+            return true;
+        }
+
+        return false;
+    }
+
+    private void ProcessNotes(double elapsedSeconds, double badWindow)
+    {
         AdvanceGlobalNoteIndex();
 
         for (var ni = _globalNoteIndex; ni < _notes.Count; ni++)
         {
             var note = _notes[ni];
+
             if (note.Type == NoteType.HoldBody || note.Consumed || note.Missed) continue;
             if (note.TimeSeconds - elapsedSeconds > badWindow) break;
             if (_pendingChordNoteSet.Contains(note)) continue;
 
             var delta = elapsedSeconds - note.TimeSeconds;
 
-            if (note.Type == NoteType.HoldStart && !_laneHoldActive[note.Lane] && _lanePressed[note.Lane])
-            {
-                if (delta >= -PreHoldAcceptanceSeconds && delta <= badWindow)
-                {
-                    var chordEndIndex = GetChordWindowEndIndex(ni, note.TimeSeconds);
-                    var chordCount = 0;
-                    var allPressed = true;
+            if (TryAutoActivatePreHeldHold(note, delta, ni, badWindow)) continue;  // pass badWindow
+            if (TryProcessHoldEnd(note, delta, badWindow)) continue;
 
-                    for (var si = ni; si < chordEndIndex; si++)
-                    {
-                        var sn = _notes[si];
-                        if (sn.Consumed || sn.Missed || sn.Type != NoteType.HoldStart) continue;
-
-                        chordCount++;
-                        if (!_lanePressed[sn.Lane])
-                            allPressed = false;
-                    }
-
-                    if (chordCount == 1)
-                    {
-                        ActivateHold(note);
-                        RegisterJudgment(HitJudgment.Perfect);
-                    }
-                    else if (allPressed)
-                    {
-                        for (var si = ni; si < chordEndIndex; si++)
-                        {
-                            var sn = _notes[si];
-                            if (sn.Consumed || sn.Missed || sn.Type != NoteType.HoldStart) continue;
-                            ActivateHold(sn);
-                        }
-
-                        RegisterJudgment(HitJudgment.Perfect);
-                    }
-
-                    continue;
-                }
-            }
-
-            if (note.Type == NoteType.HoldEnd)
-            {
-                if (_laneHoldActive[note.Lane])
-                {
-                    if (delta >= 0)
-                    {
-                        note.Consumed = true;
-                        _laneHoldActive[note.Lane] = false;
-                        if (note.HoldPartner != null) note.HoldPartner.IsHoldActive = false;
-
-                        var judgment = _lanePressed[note.Lane] ? HitJudgment.Perfect : HitJudgment.Miss;
-                        RegisterJudgment(judgment);
-                    }
-                }
-                else if (delta > badWindow)
-                {
-                    note.Consumed = true;
-                    note.Missed = true;
-                }
-
-                continue;
-            }
-
-            if (delta > badWindow && (note.Type == NoteType.Tap || note.Type == NoteType.HoldStart))
-            {
-                var chordEndIndex = GetChordWindowEndIndex(ni, note.TimeSeconds);
-                var missedAny = false;
-
-                for (var si = ni; si < chordEndIndex; si++)
-                {
-                    var sn = _notes[si];
-                    if (sn.Consumed || sn.Missed) continue;
-                    if (sn.Type != NoteType.Tap && sn.Type != NoteType.HoldStart) continue;
-
-                    sn.Consumed = true;
-                    sn.Missed = true;
-                    if (sn.Type == NoteType.HoldStart)
-                        _laneHoldActive[sn.Lane] = false;
-
-                    missedAny = true;
-                }
-
-                if (missedAny)
-                    RegisterJudgment(HitJudgment.Miss);
-            }
+            if (delta > badWindow && note.Type is NoteType.Tap or NoteType.HoldStart)
+                MissChordGroup(ni);
         }
 
         AdvanceGlobalNoteIndex();
+    }
 
-        for (var ti = 0; ti < _holdTicks.Count; ti++)
+    /// <summary>
+    /// Scores or dismisses a HoldEnd note. Returns true when the note was handled.
+    /// </summary>
+    private bool TryProcessHoldEnd(PlayableNote note, double delta, double badWindow)
+    {
+        if (note.Type != NoteType.HoldEnd) return false;
+
+        if (_laneHoldActive[note.Lane])
         {
-            var tick = _holdTicks[ti];
+            if (delta >= 0d)
+            {
+                note.Consumed = true;
+                _laneHoldActive[note.Lane] = false;
+                if (note.HoldPartner != null)
+                    note.HoldPartner.IsHoldActive = false;
+
+                RegisterJudgment(_lanePressed[note.Lane] ? HitJudgment.Perfect : HitJudgment.Miss);
+            }
+        }
+        else if (delta > badWindow)
+        {
+            note.Consumed = true;
+            note.Missed = true;
+        }
+
+        return true;
+    }
+
+    /// <summary>Marks every note in a chord group as missed and registers one Miss judgment.</summary>
+    private void MissChordGroup(int startIndex)
+    {
+        var end = GetChordWindowEndIndex(startIndex, _notes[startIndex].TimeSeconds);
+        var missedAny = false;
+
+        for (var si = startIndex; si < end; si++)
+        {
+            var sn = _notes[si];
+            if (sn.Consumed || sn.Missed || sn.Type is not (NoteType.Tap or NoteType.HoldStart)) continue;
+
+            sn.Consumed = true;
+            sn.Missed = true;
+            if (sn.Type == NoteType.HoldStart) _laneHoldActive[sn.Lane] = false;
+
+            missedAny = true;
+        }
+
+        if (missedAny) RegisterJudgment(HitJudgment.Miss);
+    }
+
+    private void ProcessHoldTicks(double elapsedSeconds)
+    {
+        foreach (var tick in _holdTicks)
+        {
             if (tick.Scored) continue;
 
             var delta = elapsedSeconds - tick.TimeSeconds;
             if (delta < -TickWindowSeconds) break;
 
             tick.Scored = true;
-            var isHoldingCorrectly = _laneHoldActive[tick.Lane] && _lanePressed[tick.Lane];
-            RegisterJudgment(isHoldingCorrectly ? HitJudgment.Perfect : HitJudgment.Miss);
+            RegisterJudgment(_laneHoldActive[tick.Lane] && _lanePressed[tick.Lane]
+                ? HitJudgment.Perfect
+                : HitJudgment.Miss);
         }
-
-        if (elapsedSeconds >= SongDurationSeconds)
-        {
-            var allConsumed = true;
-            for (var ni = 0; ni < _notes.Count; ni++)
-            {
-                var n = _notes[ni];
-                if (n.Type != NoteType.HoldBody && !n.Consumed)
-                {
-                    allConsumed = false;
-                    break;
-                }
-            }
-
-            if (allConsumed)
-            {
-                IsPlaying = false;
-                LastJudgmentText = $"FINAL {Grade}";
-            }
-        }
-
-        CurrentBpm = _sortedBpmChanges.Count == 0
-            ? 120d
-            : GetBpmAt(
-                SecondsToBeatApprox(elapsedSeconds, _sortedBpmChanges),
-                _sortedBpmChanges);
     }
+
+    private void CheckSongEnd(double elapsedSeconds)
+    {
+        if (elapsedSeconds < SongDurationSeconds) return;
+        if (_notes.Any(n => n.Type != NoteType.HoldBody && !n.Consumed)) return;
+
+        IsPlaying = false;
+        LastJudgmentText = $"FINAL {Grade}";
+    }
+
+    // -------------------------------------------------------------------------
+    // Input handling
+    // -------------------------------------------------------------------------
 
     public void HandleLaneHit(int lane)
     {
         _laneFlashTimes[lane] = CurrentTimeSeconds;
         _lanePressed[lane] = true;
 
-        if (!IsPlaying || Chart is null) return;
+        if (!IsPlaying || Chart is null || _laneHoldActive[lane]) return;
 
-        if (_laneHoldActive[lane])
-            return;
+        if (TryContributeToPendingChord(lane)) return;
 
-        // --- Check if this press contributes to a pending chord ---
-        PendingChord? pendingChord = null;
-        for (var ci = 0; ci < _pendingChords.Count; ci++)
-        {
-            var c = _pendingChords[ci];
-            if (c.PressedLanes.Contains(lane)) continue;
-            var hasLane = false;
-            for (var ni = 0; ni < c.Notes.Count; ni++)
-            {
-                if (c.Notes[ni].Lane == lane) { hasLane = true; break; }
-            }
-            if (hasLane) { pendingChord = c; break; }
-        }
-
-        if (pendingChord != null)
-        {
-            pendingChord.PressedLanes.Add(lane);
-            _laneFlashTimes[lane] = CurrentTimeSeconds;
-
-            if (pendingChord.IsComplete)
-            {
-                var worstJudgment = HitJudgment.Perfect;
-                for (var ni = 0; ni < pendingChord.Notes.Count; ni++)
-                {
-                    var j = PhoenixScoring.GetJudgment(
-                        CurrentTimeSeconds - pendingChord.Notes[ni].TimeSeconds,
-                        JudgmentDifficulty);
-                    if (j > worstJudgment) worstJudgment = j;
-                }
-
-                for (var ni = 0; ni < pendingChord.Notes.Count; ni++)
-                {
-                    var n = pendingChord.Notes[ni];
-                    n.Consumed = true;
-                    if (n.Type == NoteType.HoldStart) ActivateHold(n);
-                    _laneFlashTimes[n.Lane] = CurrentTimeSeconds;
-                }
-
-                RegisterJudgment(worstJudgment);
-                foreach (var n in pendingChord.Notes) _pendingChordNoteSet.Remove(n);
-                _pendingChords.Remove(pendingChord);
-            }
-
-            return;
-        }
-
-        // --- Find the best candidate via the per-lane index — O(1) typical ---
-        AdvanceLaneIndex(lane);
-        var laneList = _laneNotes[lane];
-        var startIdx = _laneNoteIndex[lane];
-
-        PlayableNote? candidate = null;
-        var bestAbsDelta = double.MaxValue;
-
-        // Only inspect a small window around the current time — notes are sorted,
-        // so we can stop as soon as the note is too far in the future.
-        var badWindow = PhoenixScoring.GetBadWindow(JudgmentDifficulty);
-        for (var ni = startIdx; ni < laneList.Count; ni++)
-        {
-            var n = laneList[ni];
-            if (n.Consumed || n.Missed) continue;
-
-            var absDelta = Math.Abs(n.TimeSeconds - CurrentTimeSeconds);
-
-            // Notes are time-sorted: once we're beyond the bad window in the future, stop.
-            if (n.TimeSeconds - CurrentTimeSeconds > badWindow) break;
-
-            if (absDelta < bestAbsDelta) { bestAbsDelta = absDelta; candidate = n; }
-        }
-
+        var candidate = FindBestCandidate(lane);
         if (candidate is null) return;
 
         var delta = CurrentTimeSeconds - candidate.TimeSeconds;
         var judgment = PhoenixScoring.GetJudgment(delta, JudgmentDifficulty);
+
         if (judgment == HitJudgment.Miss) return;
+        if (candidate.Type == NoteType.HoldStart && delta < 0d) return;
 
-        if (candidate.Type == NoteType.HoldStart && delta < 0)
-            return;
+        if (CountChordMembers(candidate) == 1)
+            HitSingleNote(candidate, judgment);
+        else
+            StartPendingChord(candidate, lane);
+    }
 
-        // Count chord siblings using only the per-lane lists — visits at most
-        // ~5 notes total across all lanes rather than scanning the full note list.
-        var chordMemberCount = 0;
+    public void HandleLaneRelease(int lane) => _lanePressed[lane] = false;
+
+    private bool TryContributeToPendingChord(int lane)
+    {
+        PendingChord? chord = null;
+        for (var ci = 0; ci < _pendingChords.Count; ci++)
+        {
+            var c = _pendingChords[ci];
+            if (c.PressedLanes.Contains(lane)) continue;
+
+            for (var ni = 0; ni < c.Notes.Count; ni++)
+            {
+                if (c.Notes[ni].Lane != lane) continue;
+                chord = c;
+                break;
+            }
+
+            if (chord is not null) break;
+        }
+
+        if (chord is null) return false;
+
+        chord.PressedLanes.Add(lane);
+        _laneFlashTimes[lane] = CurrentTimeSeconds;
+
+        if (!chord.IsComplete) return true;
+
+        var worst = HitJudgment.Perfect;
+        for (var ni = 0; ni < chord.Notes.Count; ni++)
+        {
+            var j = PhoenixScoring.GetJudgment(CurrentTimeSeconds - chord.Notes[ni].TimeSeconds, JudgmentDifficulty);
+            if (j > worst) worst = j;
+        }
+
+        foreach (var n in chord.Notes)
+        {
+            n.Consumed = true;
+            if (n.Type == NoteType.HoldStart) ActivateHold(n);
+            _laneFlashTimes[n.Lane] = CurrentTimeSeconds;
+        }
+
+        RegisterJudgment(worst);
+        RemovePendingChord(chord);
+        return true;
+    }
+
+    /// <summary>Finds the closest unhit note in the given lane within the bad window.</summary>
+    private PlayableNote? FindBestCandidate(int lane)
+    {
+        AdvanceLaneIndex(lane);
+
+        var badWindow = PhoenixScoring.GetBadWindow(JudgmentDifficulty);
+        var list = _laneNotes[lane];
+        var startIdx = _laneNoteIndex[lane];
+        PlayableNote? best = null;
+        var bestDelta = double.MaxValue;
+
+        for (var ni = startIdx; ni < list.Count; ni++)
+        {
+            var n = list[ni];
+            if (n.Consumed || n.Missed) continue;
+            if (n.TimeSeconds - CurrentTimeSeconds > badWindow) break;
+
+            var absDelta = Math.Abs(n.TimeSeconds - CurrentTimeSeconds);
+            if (absDelta < bestDelta) { bestDelta = absDelta; best = n; }
+        }
+
+        return best;
+    }
+
+    private void HitSingleNote(PlayableNote note, HitJudgment judgment)
+    {
+        note.Consumed = true;
+        if (note.Type == NoteType.HoldStart) ActivateHold(note);
+        RegisterJudgment(judgment);
+    }
+
+    private void StartPendingChord(PlayableNote reference, int triggerLane)
+    {
+        var chord = new PendingChord();
         var laneCount = IsDoubleChart ? 10 : 5;
+
         for (var l = 0; l < laneCount; l++)
         {
             AdvanceLaneIndex(l);
-            var ll = _laneNotes[l];
-            var li = _laneNoteIndex[l];
-            for (var ni = li; ni < ll.Count; ni++)
+            var list = _laneNotes[l];
+            var idx = _laneNoteIndex[l];
+
+            for (var ni = idx; ni < list.Count; ni++)
             {
-                var n = ll[ni];
+                var n = list[ni];
                 if (n.Consumed || n.Missed) continue;
-                if (n.TimeSeconds - candidate.TimeSeconds > ChordWindowSeconds) break;
-                if (Math.Abs(n.TimeSeconds - candidate.TimeSeconds) <= ChordWindowSeconds)
-                    chordMemberCount++;
+                if (n.TimeSeconds - reference.TimeSeconds > ChordWindowSeconds) break;
+                chord.Notes.Add(n);
             }
         }
 
-        if (chordMemberCount == 1)
-        {
-            candidate.Consumed = true;
-            if (candidate.Type == NoteType.HoldStart)
-                ActivateHold(candidate);
-            RegisterJudgment(judgment);
-        }
-        else
-        {
-            var chord = new PendingChord();
-            for (var l = 0; l < laneCount; l++)
-            {
-                var ll = _laneNotes[l];
-                var li = _laneNoteIndex[l];
-                for (var ni = li; ni < ll.Count; ni++)
-                {
-                    var n = ll[ni];
-                    if (n.Consumed || n.Missed) continue;
-                    if (n.TimeSeconds - candidate.TimeSeconds > ChordWindowSeconds) break;
-                    if (Math.Abs(n.TimeSeconds - candidate.TimeSeconds) <= ChordWindowSeconds)
-                        chord.Notes.Add(n);
-                }
-            }
-            chord.PressedLanes.Add(lane);
-            _laneFlashTimes[lane] = CurrentTimeSeconds;
-            _pendingChords.Add(chord);
-            foreach (var n in chord.Notes) _pendingChordNoteSet.Add(n);
-        }
+        chord.PressedLanes.Add(triggerLane);
+        _laneFlashTimes[triggerLane] = CurrentTimeSeconds;
+        _pendingChords.Add(chord);
+        foreach (var n in chord.Notes) _pendingChordNoteSet.Add(n);
     }
 
-    public void HandleLaneRelease(int lane)
-    {
-        _lanePressed[lane] = false;
-    }
+    // -------------------------------------------------------------------------
+    // Public accessors
+    // -------------------------------------------------------------------------
 
     public double GetLaneFlashAge(int lane) => CurrentTimeSeconds - _laneFlashTimes[lane];
-
-    public bool IsLaneHoldActive(int lane)
-        => lane >= 0 && lane < _laneHoldActive.Length && _laneHoldActive[lane];
+    public bool IsLaneHoldActive(int lane) => (uint)lane < MaxLanes && _laneHoldActive[lane];
 
     /// <summary>
-    /// Returns the most recent <see cref="HitJudgment"/> registered on <paramref name="lane"/>,
-    /// or <see cref="HitJudgment.Miss"/> if the flash window (250 ms) has already expired.
+    /// Returns the last judgment on a lane, or <see cref="HitJudgment.Miss"/>
+    /// if the 250 ms burst window has elapsed.
     /// </summary>
     public HitJudgment GetLaneLastJudgment(int lane)
     {
-        if (lane < 0 || lane >= _laneLastJudgment.Length)
-            return HitJudgment.Miss;
+        if ((uint)lane >= MaxLanes) return HitJudgment.Miss;
 
-        const double burstWindowSeconds = 0.25d;
-        if (CurrentTimeSeconds - _laneFlashTimes[lane] > burstWindowSeconds)
+        if (CurrentTimeSeconds - _laneFlashTimes[lane] > 0.25d)
             _laneLastJudgment[lane] = HitJudgment.Miss;
 
         return _laneLastJudgment[lane];
     }
 
     // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
-    /// <summary>Activates a hold-start note and its partner.</summary>
-    private void ActivateHold(PlayableNote note)
-    {
-        note.Consumed = true;
-        note.IsHoldActive = true;
-        _laneHoldActive[note.Lane] = true;
-        if (note.HoldPartner != null) note.HoldPartner.IsHoldActive = true;
-    }
-
-    // -------------------------------------------------------------------------
     // Scoring
     // -------------------------------------------------------------------------
-
-    // Running weighted sum for incremental score calculation — avoids per-hit dictionary enumeration
-    private double _weightedSum;
-    private bool _scoreDirty = false;
-
-    /// <summary>
-    /// Final score (0–1,000,000). Computed lazily — only recalculated when
-    /// accessed after a judgment has been registered since the last read.
-    /// Safe to read every frame from the results screen; zero-cost during gameplay.
-    /// </summary>
-    public int Score
-    {
-        get
-        {
-            if (_scoreDirty)
-            {
-                _cachedScore = PhoenixScoring.CalculateScoreIncremental(_weightedSum, TotalNoteCount, MaxCombo);
-                _cachedGrade = PhoenixScoring.CalculateGrade(_cachedScore);
-                _cachedPlate = PhoenixScoring.CalculatePlate(_counts, TotalNoteCount);
-                _scoreDirty = false;
-            }
-            return _cachedScore;
-        }
-    }
-
-    private int _cachedScore;
-
-    public string Grade
-    {
-        get { _ = Score; return _cachedGrade; }
-    }
-
-    private string _cachedGrade = "D";
-
-    public string Plate
-    {
-        get { _ = Score; return _cachedPlate; }
-    }
-
-    private string _cachedPlate = "";
 
     private void RegisterJudgment(HitJudgment judgment)
     {
@@ -771,18 +524,11 @@ public sealed class RhythmGameEngine
         else
         {
             MissCombo = 0;
-            if (!PhoenixScoring.BreaksCombo(judgment))
-            {
-                Combo++;
-                MaxCombo = Math.Max(MaxCombo, Combo);
-            }
-            else
-            {
-                Combo = 0;
-            }
+            Combo = PhoenixScoring.BreaksCombo(judgment) ? 0 : Combo + 1;
+            MaxCombo = Math.Max(MaxCombo, Combo);
         }
 
-        for (var i = 0; i < _laneFlashTimes.Length; i++)
+        for (var i = 0; i < MaxLanes; i++)
         {
             if (CurrentTimeSeconds - _laneFlashTimes[i] < 0.05d)
                 _laneLastJudgment[i] = judgment;
@@ -798,14 +544,13 @@ public sealed class RhythmGameEngine
 
     private void ResetSession()
     {
-        foreach (var judgment in _counts.Keys.ToList())
-            _counts[judgment] = 0;
+        foreach (var key in _counts.Keys.ToList()) _counts[key] = 0;
 
         _weightedSum = 0d;
         _scoreDirty = false;
         _cachedScore = 0;
         _cachedGrade = "D";
-        _cachedPlate = "";
+        _cachedPlate = string.Empty;
 
         foreach (var note in _notes)
         {
@@ -814,21 +559,19 @@ public sealed class RhythmGameEngine
             note.IsHoldActive = false;
         }
 
-        foreach (var tick in _holdTicks)
-            tick.Scored = false;
+        foreach (var tick in _holdTicks) tick.Scored = false;
 
         _pendingChords.Clear();
         _pendingChordNoteSet.Clear();
-
         _globalNoteIndex = 0;
 
-        for (var lane = 0; lane < _laneFlashTimes.Length; lane++)
+        for (var i = 0; i < MaxLanes; i++)
         {
-            _laneFlashTimes[lane] = -10d;
-            _laneHoldActive[lane] = false;
-            _lanePressed[lane] = false;
-            _laneLastJudgment[lane] = HitJudgment.Miss;
-            _laneNoteIndex[lane] = 0;
+            _laneFlashTimes[i] = -10d;
+            _laneHoldActive[i] = false;
+            _lanePressed[i] = false;
+            _laneLastJudgment[i] = HitJudgment.Miss;
+            _laneNoteIndex[i] = 0;
         }
 
         CurrentTimeSeconds = 0d;
@@ -840,6 +583,225 @@ public sealed class RhythmGameEngine
         LastJudgmentText = Chart is null ? "READY" : "SELECT SONG";
     }
 
+    // -------------------------------------------------------------------------
+    // Load-time setup
+    // -------------------------------------------------------------------------
+
+    private void BuildLaneIndex()
+    {
+        for (var i = 0; i < MaxLanes; i++) _laneNotes[i].Clear();
+
+        foreach (var n in _notes.Where(n => n.Type is NoteType.Tap or NoteType.HoldStart))
+            _laneNotes[n.Lane].Add(n);
+
+        for (var i = 0; i < MaxLanes; i++)
+            _laneNotes[i].Sort(static (a, b) => a.TimeSeconds.CompareTo(b.TimeSeconds));
+    }
+
+    /// <summary>Counts distinct chord groups for the scoring denominator.</summary>
+    private void ComputeChordGroupCount()
+    {
+        var scoreable = _notes
+            .Where(n => n.Type is NoteType.Tap or NoteType.HoldStart)
+            .OrderBy(n => n.TimeSeconds)
+            .ToList();
+
+        _chordGroupCount = 0;
+        var i = 0;
+        while (i < scoreable.Count)
+        {
+            _chordGroupCount++;
+            var groupTime = scoreable[i].TimeSeconds;
+            while (i < scoreable.Count && scoreable[i].TimeSeconds - groupTime <= ChordWindowSeconds)
+                i++;
+        }
+    }
+
+    private void LinkHoldNotes()
+    {
+        foreach (var laneGroup in _notes.GroupBy(n => n.Lane))
+        {
+            var laneNotes = laneGroup.OrderBy(n => n.TimeSeconds).ToList();
+
+            for (var i = 0; i < laneNotes.Count; i++)
+            {
+                if (laneNotes[i].Type != NoteType.HoldStart) continue;
+
+                var end = laneNotes.Skip(i + 1).FirstOrDefault(n => n.Type == NoteType.HoldEnd);
+                if (end is null) continue;
+
+                laneNotes[i].HoldPartner = end;
+                end.HoldPartner = laneNotes[i];
+            }
+        }
+    }
+
+    private void GenerateHoldTicks(IReadOnlyList<TickCount> tickCounts)
+    {
+        _holdTicks = [];
+        if (_sortedBpmChanges.Count == 0) return;
+
+        foreach (var head in _notes.Where(n => n.Type == NoteType.HoldStart && n.HoldPartner != null))
+        {
+            var tail = head.HoldPartner!;
+            var currentBeat = head.Beat;
+            var currentTime = head.TimeSeconds;
+
+            while (currentTime < tail.TimeSeconds)
+            {
+                var ticksPerBeat = GetTicksPerBeat(currentBeat, tickCounts);
+                var bpm = GetBpmAt(currentBeat, _sortedBpmChanges);
+
+                if (ticksPerBeat <= 0 || bpm <= 0) break;
+
+                var secondsPerTick = 60.0 / bpm / ticksPerBeat;
+                if (secondsPerTick <= 0) break;
+
+                var nextTime = currentTime + secondsPerTick;
+                var nextBeat = currentBeat + 1.0 / ticksPerBeat;
+
+                if (nextTime < tail.TimeSeconds - 0.001d)
+                    _holdTicks.Add(new HoldTick { Lane = head.Lane, TimeSeconds = nextTime });
+
+                currentTime = nextTime;
+                currentBeat = nextBeat;
+            }
+        }
+
+        _holdTicks.Sort((a, b) => a.TimeSeconds.CompareTo(b.TimeSeconds));
+    }
+
+    // -------------------------------------------------------------------------
+    // Index helpers
+    // -------------------------------------------------------------------------
+
+    private void AdvanceLaneIndex(int lane)
+    {
+        var list = _laneNotes[lane];
+        var idx = _laneNoteIndex[lane];
+        while (idx < list.Count && (list[idx].Consumed || list[idx].Missed)) idx++;
+        _laneNoteIndex[lane] = idx;
+    }
+
+    private void AdvanceGlobalNoteIndex()
+    {
+        while (_globalNoteIndex < _notes.Count)
+        {
+            var n = _notes[_globalNoteIndex];
+            if (n.Type == NoteType.HoldBody || n.Consumed || n.Missed)
+                _globalNoteIndex++;
+            else
+                break;
+        }
+    }
+
+    private int GetChordWindowEndIndex(int startIndex, double referenceTime)
+    {
+        var end = startIndex;
+        while (end < _notes.Count && _notes[end].TimeSeconds - referenceTime <= ChordWindowSeconds)
+            end++;
+        return end;
+    }
+
+    // -------------------------------------------------------------------------
+    // Note range helpers
+    // -------------------------------------------------------------------------
+
+    private void ActivateHold(PlayableNote note)
+    {
+        note.Consumed = true;
+        note.IsHoldActive = true;
+        _laneHoldActive[note.Lane] = true;
+        if (note.HoldPartner != null) note.HoldPartner.IsHoldActive = true;
+    }
+
+    private void RemovePendingChord(PendingChord chord)
+    {
+        foreach (var n in chord.Notes) _pendingChordNoteSet.Remove(n);
+        _pendingChords.Remove(chord);
+    }
+
+    private int CountChordMembers(PlayableNote reference)
+    {
+        var laneCount = IsDoubleChart ? 10 : 5;
+        var count = 0;
+
+        for (var l = 0; l < laneCount; l++)
+        {
+            AdvanceLaneIndex(l);
+            var list = _laneNotes[l];
+            var idx = _laneNoteIndex[l];
+
+            for (var ni = idx; ni < list.Count; ni++)
+            {
+                var n = list[ni];
+                if (n.Consumed || n.Missed) continue;
+                if (n.TimeSeconds - reference.TimeSeconds > ChordWindowSeconds) break;
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private int CountActiveHoldStarts(int startIndex, int endIndex)
+    {
+        var count = 0;
+        for (var i = startIndex; i < endIndex; i++)
+        {
+            var n = _notes[i];
+            if (!n.Consumed && !n.Missed && n.Type == NoteType.HoldStart) count++;
+        }
+        return count;
+    }
+
+    private bool AllHoldsPressedInRange(int startIndex, int endIndex)
+    {
+        for (var i = startIndex; i < endIndex; i++)
+        {
+            var n = _notes[i];
+            if (!n.Consumed && !n.Missed && n.Type == NoteType.HoldStart && !_lanePressed[n.Lane])
+                return false;
+        }
+        return true;
+    }
+
+    private void ActivateHoldsInRange(int startIndex, int endIndex)
+    {
+        for (var i = startIndex; i < endIndex; i++)
+        {
+            var n = _notes[i];
+            if (!n.Consumed && !n.Missed && n.Type == NoteType.HoldStart)
+                ActivateHold(n);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // BPM / timing utilities
+    // -------------------------------------------------------------------------
+
+    private static int GetTicksPerBeat(double beat, IReadOnlyList<TickCount> tickCounts)
+    {
+        var active = 4;
+        foreach (var tc in tickCounts)
+        {
+            if (tc.Beat <= beat + 0.0001d) active = tc.TicksPerBeat;
+            else break;
+        }
+        return active;
+    }
+
+    private static double GetBpmAt(double beat, IReadOnlyList<BpmChange> bpmChanges)
+    {
+        var bpm = bpmChanges[0].Bpm;
+        foreach (var bc in bpmChanges)
+        {
+            if (bc.Beat <= beat + 0.0001d) bpm = bc.Bpm;
+            else break;
+        }
+        return bpm;
+    }
+
     private static double SecondsToBeatApprox(double seconds, IReadOnlyList<BpmChange> bpmChanges)
     {
         if (seconds <= 0d || bpmChanges.Count == 0) return 0d;
@@ -849,11 +811,9 @@ public sealed class RhythmGameEngine
         var currentBpm = bpmChanges[0].Bpm;
         var lastBeat = 0d;
 
-        for (var i = 0; i < bpmChanges.Count; i++)
+        foreach (var change in bpmChanges)
         {
-            var change = bpmChanges[i];
-            var segmentBeats = change.Beat - lastBeat;
-            var segmentSeconds = segmentBeats / currentBpm * 60d;
+            var segmentSeconds = (change.Beat - lastBeat) / currentBpm * 60d;
             if (elapsed + segmentSeconds >= seconds) break;
 
             elapsed += segmentSeconds;
@@ -862,7 +822,6 @@ public sealed class RhythmGameEngine
             currentBpm = change.Bpm;
         }
 
-        beat += (seconds - elapsed) / 60d * currentBpm;
-        return beat;
+        return beat + (seconds - elapsed) / 60d * currentBpm;
     }
 }
